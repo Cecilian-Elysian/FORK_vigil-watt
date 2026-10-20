@@ -7,6 +7,8 @@
 
 | 编号 | 结论 |
 |---|---|
+| CR-73 | Win11 任务栏 XAML 盲区（搜索框/任务按钮/托盘）由 UIA 占位根治（2026-10-21，`TaskbarXamlRects` 后台 500ms 收集、与枚举合并）。先前"整带像素采样"方案被实测证伪：26200 上 BitBlt 任务栏区域 100% 纯黑，GDI 采不到 XAML 合成表面。见 runtime-pitfalls.md §16.11 |
+| CR-48 | 拖动功能整体移除（2026-10-20，用户要求）：与搜索框等 XAML 输入层抢 capture、位置记忆固化问题随之消失。贴片位置完全由避让算法决定 |
 | CR-39 | 贴片默认落点会避让任务按钮区与其他任务栏工具（占位枚举 + 空隙落位），不再默认压住按钮。拖动命中层那半条归 CR-48。见 runtime-pitfalls.md §16.11 |
 | CR-71 | 社区 issue #12（任务栏贴片避让托盘图标）已实现：`TaskbarOccupancy` 枚举占位（含顶层浮窗）+ `TaskbarLayout.PlaceAvoiding` 空隙落位 + 台数自动收窄。见 runtime-pitfalls.md §16.11 |
 | CR-62 | 空槽负缓存 5 分钟 + 每轮最多补探 1 槽；空接收器也启只读监听。见 code-flow.md §2.1 |

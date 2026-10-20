@@ -32,7 +32,7 @@
 
 | 功能 | 来源 / 设计依据 | 本项目实现与边界 |
 |---|---|---|
-| 任务栏电量贴片 | 基于 Windows 任务栏窗口层级与 Win32 子窗口行为的本项目探索；现有资料未确认采用外部应用项目的代码或设计。 | `SetParent` 将原生子窗口挂入 `Shell_TrayWnd`，自行处理布局、绘制、拖动和自动隐藏。实现坑与依据见 [runtime-pitfalls.md](../dev/runtime-pitfalls.md)。 |
+| 任务栏电量贴片 | 基于 Windows 任务栏窗口层级与 Win32 子窗口行为的本项目探索；现有资料未确认采用外部应用项目的代码或设计。 | `SetParent` 将原生子窗口挂入 `Shell_TrayWnd`，自行处理布局、绘制、避让和自动隐藏。实现坑与依据见 [runtime-pitfalls.md](../dev/runtime-pitfalls.md)。 |
 | 桌面小组件 | 基于 WinUI / Win32 窗口能力的本项目实现；现有资料未记录外部项目参考。 | 使用独立透明窗口表面；平台差异和限制见 [runtime-pitfalls.md](../dev/runtime-pitfalls.md)。 |
 | 历史统计与管理 | 本项目需求与 SQLite 能力，没有已记录的外部实现参考。 | 历史存储、曲线、指标、按设备删除与 VACUUM 由本项目实现；数据流程见 [architecture.md](../project/architecture.md)。 |
 | 插件发现与写入安全 | 本项目自身架构与硬件安全事故经验，不以第三方协议实现作为写入许可。 | 新插件遵守基类、显式授权、被动优先和“只发有出处的帧”；见 [safety.md](safety.md)。 |

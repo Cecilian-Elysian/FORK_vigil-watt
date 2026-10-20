@@ -17,7 +17,6 @@
 | **CR-36** | `TryEnqueue` 失败时 `_refreshQueued` 不会复位。窗口关掉后不再收请求，当前无实际后果 | `WidgetWindow.xaml.cs:RequestRefresh`、`DevicesPage.xaml.cs:RequestRefresh` | `open` |
 | **CR-41** | 竖向任务栏、多屏、自动隐藏没有真机看过 | `TaskbarPillWindow.cs:TryGetTaskbar`、`TaskbarLayout.cs:PlaceAvoiding` | `open` |
 | **CR-42** | 贴片颜色跟应用主题，不跟任务栏实际明暗 | `TaskbarPillRenderer.cs:SkinFor` | `open` |
-| **CR-48** | 贴片拖动手感没真机试过。留白靠 alpha=1 的命中层 | `TaskbarPillWindow.cs:OnLButtonDown` | `open` |
 | **CR-50** | 日志跨午夜换文件没有单测。要测得注入时钟 | `Utils/Log.cs:EnsureWriter` | `open` |
 | **CR-52** | `ShutdownLogging` 的注释仍说没人调用 `Dispose`，实际退出路径会调 | `App.xaml.cs:ShutdownLogging` | `open` |
 | **CR-61** | 日志在锁里同步刷盘，UI 线程可能等磁盘。改缓冲会丢掉崩溃前最后几行，所以先不改 | `Utils/Log.cs:Emit` | `open` |
@@ -27,7 +26,6 @@
 | **CR-69** | 社区 PR #16（设备管理）未纳入：删离线条目会连带删历史（虽先 `VACUUM INTO` 备份），"只显示在线""电量条对齐"边界未定。冲突面在文档 + `BatteryPluginBase` + `AppSettings` | PR #16 提交 `6908997f` | `open` |
 | **CR-70** | 社区 PR #15 的 BLE 大改未纳入（`BleBatteryWatcher` +38/-22、`WatcherProps`、`DeviceKindGuesser`、`DeviceSourceInfo`、`SettingsPage`）。通用 GATT 路径已能读标准电池服务，故本轮只摘设备插件；蓝牙通道要单独一轮 | PR #15 | `open` |
 | **CR-72** | 社区 issue #11 现象 2（断电后死锁）未处理：涉及基类读实现，风险高于收益，需单独排期并配复现手段 | issue #11 | `open` |
-| **CR-73** | Win10「资讯和兴趣」小组件在任务栏 XAML 岛里（`DesktopWindowContentBridge` 覆盖整条任务栏），枚举不到它的真实矩形，贴片仍可能压到它。要解决得走 UI Automation 读 XAML 树 | `Services/TaskbarOccupancy.cs:Collect` | `open` |
 
 ## 重构候选（未做）
 
