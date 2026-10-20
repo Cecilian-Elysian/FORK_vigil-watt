@@ -18,8 +18,9 @@ public sealed class TaskbarPillWindow : IDisposable
     private const string TipClassName = "VigilWattTaskbarPillTip";
     private const string WindowTitle = "VigilWatt 任务栏电量";
 
-    /// <summary>跟随节拍：邻窗（酷狗歌词等）会带动画地变宽变窄，扫描太慢贴片就跟得像在跳。</summary>
-    private const int FollowIntervalMs = 100;
+    /// <summary>跟随节拍：邻窗（酷狗歌词等）会带动画地变宽变窄，扫描太慢贴片就跟得像在跳；
+    /// 50ms 让占位突变（悬停切换、开关应用）到让位的盲区从 ~100ms 收到 ~50ms。</summary>
+    private const int FollowIntervalMs = 50;
 
     private const double MinHeightDip = 22, MaxHeightDip = 40;
     private const double TaskbarMarginDip = 6;

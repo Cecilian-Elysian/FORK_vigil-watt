@@ -9,8 +9,9 @@ namespace VigilWatt.App.Services;
 /// </summary>
 internal static class TaskbarXamlRects
 {
-    /// <summary>后台刷新节拍。系统 UI 位置变化极低频（开关应用才动），对 explorer 的跨进程请求频率压到最低。</summary>
-    private const int RefreshIntervalMs = 500;
+    /// <summary>后台刷新节拍。系统 UI 矩形平时极少变（开关应用才动），250ms 让 XAML 侧变化的
+    /// 盲窗减半；对 explorer 的跨进程请求频率仍压得很低。</summary>
+    private const int RefreshIntervalMs = 250;
 
     /// <summary>AutomationId 精确命中的系统按钮；其余靠类名模式兜（Taskbar.*、SystemTray.*、*AutomationPeer）。</summary>
     private static readonly HashSet<string> KnownIds = new(StringComparer.Ordinal)

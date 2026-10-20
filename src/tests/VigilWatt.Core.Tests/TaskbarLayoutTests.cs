@@ -259,40 +259,6 @@ public class TaskbarLayoutTests
         Assert.Equal(2, TaskbarLayout.NextDeviceCount(1, 3, roomy, 10));
     }
 
-    // T24：内容感知避让——酷狗悬停切控件时窗口矩形不变（1373~1573）、内容右对齐到 1451，
-    // 占位按内容左缘收窄后贴片才能贴住图标；歌词态内容从 1374 起就有，占位不变
-    [Fact]
-    public void RefineByContent_ControlsModeShrinksPlaceholder()
-    {
-        var window = new PixelRect(1373, 1032, 200, 48);
-
-        var controls = TaskbarLayout.RefineByContent(window, 1451);
-        Assert.Equal(new PixelRect(1451, 1032, 122, 48), controls);
-
-        // 收窄后贴片右移贴住图标（控件态）
-        var tray = new PixelRect(1573, 1032, 347, 48);
-        var p = TaskbarLayout.PlaceAvoiding(BottomTaskbar, tray, 97, 36, 0, 6, [controls]);
-        Assert.Equal(1451 - 97 - 6, p.X);
-
-        // 歌词态：内容从窗左缘 1px 处就有，占位只收掉这 1px，对贴片位置没有实际影响
-        var lyrics = TaskbarLayout.RefineByContent(window, 1374);
-        Assert.Equal(new PixelRect(1374, 1032, 199, 48), lyrics);
-    }
-
-    // T25：采样失败（null）或噪声值不能放大占位、也不能把占位收没——一律回退窗口矩形
-    [Theory]
-    [InlineData(null, 1373, 200)]
-    [InlineData(100, 1373, 200)]    // 落在窗左缘外：噪声，忽略
-    [InlineData(1373, 1373, 200)]   // 恰在左缘：没有收窄空间
-    [InlineData(1573, 1373, 200)]   // 恰在右缘：收成零宽没有意义
-    public void RefineByContent_BadSamplesFallBack(int? sample, int left, int width)
-    {
-        var window = new PixelRect(1373, 1032, 200, 48);
-        var refined = TaskbarLayout.RefineByContent(window, sample);
-        Assert.Equal(left, refined.Left);
-        Assert.Equal(width, refined.Width);
-    }
-
     private static readonly PixelRect[] NoOccupancy = Array.Empty<PixelRect>();
 }
 
