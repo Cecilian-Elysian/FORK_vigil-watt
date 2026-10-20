@@ -189,6 +189,36 @@ internal static class Native
     /// <summary>任务栏内的通知区域（图标 + 时钟）类名，贴片就贴在它左边。</summary>
     public const string TrayNotifyClassName = "TrayNotifyWnd";
 
+    // ---- 占位枚举（贴片避让用）----
+    public delegate bool EnumWindowsProc(IntPtr hwnd, IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    public static extern bool EnumWindows(EnumWindowsProc callback, IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    public static extern bool EnumChildWindows(IntPtr parent, EnumWindowsProc callback, IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    public static extern bool IsWindowVisible(IntPtr hwnd);
+
+    [DllImport("user32.dll")]
+    public static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint processId);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    public static extern int GetClassNameW(IntPtr hwnd, System.Text.StringBuilder text, int maxCount);
+
+    /// <summary>取窗口的根窗口（GW_ROOT）：判断某浮窗是不是任务栏的后代。</summary>
+    public const int GA_ROOT = 2;
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr GetAncestor(IntPtr hwnd, int flags);
+
+    /// <summary>DWM 隐藏标记：UWP/XAML 宿主窗口会留一个不可见但有尺寸的壳，不排除就会挡住整条任务栏。</summary>
+    public const int DWMWA_CLOAKED = 14;
+
+    [DllImport("dwmapi.dll")]
+    public static extern int DwmGetWindowAttribute(IntPtr hwnd, int attr, out int value, int size);
+
     // ---- 窗口圆角（仅 Win11）----
     // ⚠ Win10 **不要**用 SetWindowRgn 裁圆角：WinUI 3 的内容走 DirectComposition，SetWindowRgn
     // 只裁传统 GDI 区域、对 DComp 内容完全无效（实测"设了区域仍是直角"）。

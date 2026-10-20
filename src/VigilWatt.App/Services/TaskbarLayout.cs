@@ -35,29 +35,41 @@ public static class TaskbarLayout
         return (int)Math.Ceiling(Math.Clamp(thicknessDip - marginDip * 2, minDip, maxDip) * scale);
     }
 
+    /// <summary>贴片可用的轴向区间：横放是任务栏左缘到托盘左缘，竖放是上缘到托盘上缘。</summary>
+    public static (int Min, int Max) Band(PixelRect taskbar, PixelRect tray, bool horizontal) => horizontal
+        ? (taskbar.Left + EdgeInsetPx, tray.Width > 0 ? tray.Left : taskbar.Right)
+        : (taskbar.Top + EdgeInsetPx, tray.Height > 0 ? tray.Top : taskbar.Bottom);
+
     /// <summary>
-    /// 贴片左上角（物理像素）。默认位 = 紧贴托盘左边（竖向任务栏则是托盘上边），再叠加用户拖动出来的
-    /// <paramref name="offset"/>；结果夹在任务栏内，并把"实际落点"反推回 <paramref name="appliedOffset"/>——
-    /// 这样拖到头再往回拖不会有一段"空走"。
+    /// 贴片左上角（物理像素）。默认位 = 紧贴托盘左边（竖向任务栏则是托盘上边）；该位置被别的
+    /// 任务栏工具占了就退到能放下的最靠右空隙，再叠加用户拖动出来的 <paramref name="offset"/>。
+    /// 偏移相对"实际锚点"记账，锚点被占而移动时用户拖出来的相对位置不丢。
     /// </summary>
-    public static (int X, int Y) Place(
-        PixelRect taskbar, PixelRect tray, int pillW, int pillH, int offset, int gapPx, out int appliedOffset)
+    public static Placement PlaceAvoiding(
+        PixelRect taskbar, PixelRect tray, int pillW, int pillH, int offset, int gapPx,
+        IReadOnlyList<PixelRect> occupied)
     {
-        if (IsHorizontal(taskbar))
+        bool horizontal = IsHorizontal(taskbar);
+        var spans = ProjectSpans(occupied, taskbar, horizontal);
+
+        if (horizontal)
         {
-            int anchor = (tray.Width > 0 ? tray.Left : taskbar.Right) - pillW - gapPx;
+            var (bandMin, bandMax) = Band(taskbar, tray, true);
+            bool fits = TryPlaceAlong(bandMin, bandMax, pillW, gapPx, spans, out int anchor);
+            if (!fits) anchor = bandMax - pillW - gapPx;
             int min = taskbar.Left + EdgeInsetPx;
             int max = Math.Max(min, taskbar.Right - pillW - EdgeInsetPx);
             int x = Math.Clamp(anchor + offset, min, max);
-            appliedOffset = x - anchor;
-            return (x, taskbar.Top + (taskbar.Height - pillH) / 2);
+            int y = taskbar.Top + (taskbar.Height - pillH) / 2;
+            return new Placement(x, y, x - anchor, fits);
         }
 
-        int anchorY = (tray.Height > 0 ? tray.Top : taskbar.Bottom) - pillH - gapPx;
+        var (bandMinV, bandMaxV) = Band(taskbar, tray, false);
+        bool fitsV = TryPlaceAlong(bandMinV, bandMaxV, pillH, gapPx, spans, out int anchorY);
+        if (!fitsV) anchorY = bandMaxV - pillH - gapPx;
         int minY = taskbar.Top + EdgeInsetPx;
         int maxY = Math.Max(minY, taskbar.Bottom - pillH - EdgeInsetPx);
-        int y = Math.Clamp(anchorY + offset, minY, maxY);
-        appliedOffset = y - anchorY;
+        int yPos = Math.Clamp(anchorY + offset, minY, maxY);
 
         int centeredX = taskbar.Left + (taskbar.Width - pillW) / 2;
         if (pillW > taskbar.Width)
@@ -66,7 +78,118 @@ public static class TaskbarLayout
             // 改挂在"桌面那一侧"——左停靠往右伸、右停靠往左伸
             centeredX = taskbar.Left <= 0 ? taskbar.Left : taskbar.Right - pillW;
         }
-        return (centeredX, y);
+        return new Placement(centeredX, yPos, yPos - anchorY, fitsV);
+    }
+
+    /// <summary>贴片落点：屏幕坐标 + 相对锚点的偏移 + 这次是否放得下。</summary>
+    public readonly record struct Placement(int X, int Y, int Offset, bool Fits);
+
+    /// <summary>轴上的一段占用区间（左闭右开按端点算，空区间忽略）。</summary>
+    public readonly record struct Span(int Left, int Right);
+
+    /// <summary>
+    /// 把占位矩形投影到任务栏主轴：横向任务栏取 X 跨度，竖向取 Y 跨度。
+    /// 不与任务栏条带相交的矩形不算占位（浮在桌面上的窗口不该影响任务栏）。
+    /// </summary>
+    public static List<Span> ProjectSpans(IReadOnlyList<PixelRect> occupied, PixelRect taskbar, bool horizontal)
+    {
+        var list = new List<Span>();
+        foreach (var r in occupied)
+        {
+            if (horizontal)
+            {
+                if (r.Top >= taskbar.Bottom || r.Bottom <= taskbar.Top) continue;
+                list.Add(new Span(r.Left, r.Right));
+            }
+            else
+            {
+                if (r.Left >= taskbar.Right || r.Right <= taskbar.Left) continue;
+                list.Add(new Span(r.Top, r.Bottom));
+            }
+        }
+        return list;
+    }
+
+    /// <summary>区间合并后求差集：返回 [bandMin, bandMax] 里没被占的空隙（从左到右）。</summary>
+    public static List<Span> FreeGaps(int bandMin, int bandMax, IReadOnlyList<Span> occupied)
+    {
+        var sorted = occupied.Where(s => s.Right > bandMin && s.Left < bandMax).OrderBy(s => s.Left).ToList();
+        var gaps = new List<Span>();
+        int cursor = bandMin;
+        foreach (var s in sorted)
+        {
+            int left = Math.Max(s.Left, bandMin);
+            int right = Math.Min(s.Right, bandMax);
+            if (right <= cursor) continue;
+            if (left > cursor) gaps.Add(new Span(cursor, left));
+            cursor = right;
+        }
+        if (cursor < bandMax) gaps.Add(new Span(cursor, bandMax));
+        return gaps;
+    }
+
+    /// <summary>
+    /// 在轴上落位：默认位（贴 bandMax 端）空闲就用它；被占则退到能放下的最靠右空隙。
+    /// 空隙窄到放不下时返回 false，由调用方决定收窄内容还是隐藏。
+    /// </summary>
+    public static bool TryPlaceAlong(
+        int bandMin, int bandMax, int length, int gapPx, IReadOnlyList<Span> occupied, out int pos)
+    {
+        pos = 0;
+        if (bandMax - bandMin < length) return false;
+
+        int def = bandMax - length - gapPx;
+        if (def >= bandMin && !Overlaps(def, def + length, occupied))
+        {
+            pos = def;
+            return true;
+        }
+
+        var gaps = FreeGaps(bandMin, bandMax, occupied);
+        for (int i = gaps.Count - 1; i >= 0; i--)
+        {
+            int x = gaps[i].Right - length - gapPx;
+            if (x < gaps[i].Left) x = gaps[i].Left;
+            if (x + length > gaps[i].Right) continue;
+            pos = x;
+            return true;
+        }
+        return false;
+    }
+
+    /// <summary>区间 [a0, a1) 与任一占位区间相交。</summary>
+    public static bool Overlaps(int a0, int a1, IReadOnlyList<Span> occupied)
+    {
+        foreach (var s in occupied)
+        {
+            if (a0 < s.Right && a1 > s.Left) return true;
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// 选显示几台设备：现状放得下就保持（否则每秒重算会抖），放不下逐档收窄到 1 台，
+    /// 宽裕时逐档放宽。返回 0 表示连 1 台都放不下，调用方应当隐藏贴片。
+    /// </summary>
+    public static int NextDeviceCount(int current, int userMax, IReadOnlyList<bool> fits)
+    {
+        if (fits.Count < 2) return 0;
+        bool Fits(int k) => k >= 0 && k < fits.Count && fits[k];
+
+        int max = Math.Clamp(userMax, 1, fits.Count - 1);
+        if (current < 1) current = 1;
+        if (current > max) current = max;
+
+        if (!Fits(current))
+        {
+            for (int k = current - 1; k >= 1; k--)
+            {
+                if (Fits(k)) return k;
+            }
+            return 0;
+        }
+        if (current < max && Fits(current + 1)) return current + 1;
+        return current;
     }
 
     /// <summary>把记下偏移时的物理像素换算到当前 DPI；Dpi=0 或未变则原样返回（勿逐帧累乘，见 §16.5）。</summary>

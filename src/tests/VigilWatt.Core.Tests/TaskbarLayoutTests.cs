@@ -50,39 +50,41 @@ public class TaskbarLayoutTests
     [Fact]
     public void Place_DefaultsToLeftOfTray()
     {
-        var (x, y) = TaskbarLayout.Place(BottomTaskbar, BottomTray, 200, 36, 0, 6, out int applied);
+        var p = TaskbarLayout.PlaceAvoiding(BottomTaskbar, BottomTray, 200, 36, 0, 6, NoOccupancy);
 
-        Assert.Equal(1700 - 200 - 6, x);          // 1494
-        Assert.Equal(1032 + (48 - 36) / 2, y);    // 1038
-        Assert.Equal(0, applied);
+        Assert.Equal(1700 - 200 - 6, p.X);          // 1494
+        Assert.Equal(1032 + (48 - 36) / 2, p.Y);    // 1038
+        Assert.Equal(0, p.Offset);
+        Assert.True(p.Fits);
     }
 
     // T5：托盘找不到时退回任务栏右缘，不能因此不显示
     [Fact]
     public void Place_FallsBackToTaskbarRightEdge()
     {
-        var (x, _) = TaskbarLayout.Place(BottomTaskbar, default, 200, 36, 0, 6, out _);
-        Assert.Equal(1920 - 200 - 6, x);
+        var p = TaskbarLayout.PlaceAvoiding(BottomTaskbar, default, 200, 36, 0, 6, NoOccupancy);
+
+        Assert.Equal(1920 - 200 - 6, p.X);
     }
 
     // T6：向右拖到头会被夹住，并把"实际落点"反推回 offset —— 这样往回拖不会先空走一截
     [Fact]
     public void Place_ClampsAtRightAndBackDerivesOffset()
     {
-        var (x, _) = TaskbarLayout.Place(BottomTaskbar, BottomTray, 200, 36, 5000, 6, out int applied);
+        var p = TaskbarLayout.PlaceAvoiding(BottomTaskbar, BottomTray, 200, 36, 5000, 6, NoOccupancy);
 
-        Assert.Equal(1920 - 200 - TaskbarLayout.EdgeInsetPx, x);
-        Assert.Equal(x - (1700 - 200 - 6), applied);
+        Assert.Equal(1920 - 200 - TaskbarLayout.EdgeInsetPx, p.X);
+        Assert.Equal(p.X - (1700 - 200 - 6), p.Offset);
     }
 
     // T7：向左拖到头同理
     [Fact]
     public void Place_ClampsAtLeftAndBackDerivesOffset()
     {
-        var (x, _) = TaskbarLayout.Place(BottomTaskbar, BottomTray, 200, 36, -5000, 6, out int applied);
+        var p = TaskbarLayout.PlaceAvoiding(BottomTaskbar, BottomTray, 200, 36, -5000, 6, NoOccupancy);
 
-        Assert.Equal(TaskbarLayout.EdgeInsetPx, x);
-        Assert.Equal(x - (1700 - 200 - 6), applied);
+        Assert.Equal(TaskbarLayout.EdgeInsetPx, p.X);
+        Assert.Equal(p.X - (1700 - 200 - 6), p.Offset);
     }
 
     // T8：竖向（左停靠）任务栏：贴片挂在托盘上边，胶囊比任务栏宽时往桌面一侧伸、不出屏
@@ -92,10 +94,10 @@ public class TaskbarLayoutTests
         var taskbar = new PixelRect(0, 0, 48, 1080);
         var tray = new PixelRect(0, 860, 48, 220);
 
-        var (x, y) = TaskbarLayout.Place(taskbar, tray, 200, 36, 0, 6, out _);
+        var p = TaskbarLayout.PlaceAvoiding(taskbar, tray, 200, 36, 0, 6, NoOccupancy);
 
-        Assert.Equal(0, x);                     // 左停靠 → 从任务栏左缘往右伸，不会跑到屏幕外
-        Assert.Equal(860 - 36 - 6, y);
+        Assert.Equal(0, p.X);                     // 左停靠 → 从任务栏左缘往右伸，不会跑到屏幕外
+        Assert.Equal(860 - 36 - 6, p.Y);
     }
 
     // T9：竖向（右停靠）任务栏：胶囊往左伸，右缘对齐任务栏右缘
@@ -104,9 +106,9 @@ public class TaskbarLayoutTests
     {
         var taskbar = new PixelRect(1872, 0, 48, 1080);
 
-        var (x, _) = TaskbarLayout.Place(taskbar, default, 200, 36, 0, 6, out _);
+        var p = TaskbarLayout.PlaceAvoiding(taskbar, default, 200, 36, 0, 6, NoOccupancy);
 
-        Assert.Equal(1872 + 48 - 200, x);
+        Assert.Equal(1872 + 48 - 200, p.X);
     }
 
     // T13：DPI 往返必须从同一对规范值换算，不能漂（2K 150% ↔ 1080p 100%）
@@ -182,6 +184,91 @@ public class TaskbarLayoutTests
         var (rx, _) = TaskbarLayout.PlaceTooltip(rightBar, rightChip, 120, 28, 4, work);
         Assert.Equal(1720 - 120 - 4, rx);
     }
+
+    // T18：占位区间先合并再求差集；越界的部分要裁掉
+    [Fact]
+    public void FreeGaps_MergesAndClips()
+    {
+        var gaps = TaskbarLayout.FreeGaps(0, 100, new[]
+        {
+            new TaskbarLayout.Span(10, 30),
+            new TaskbarLayout.Span(20, 40),   // 与上一段相交，要并成一段
+            new TaskbarLayout.Span(60, 70),
+        });
+
+        Assert.Equal(3, gaps.Count);
+        Assert.Equal(new TaskbarLayout.Span(0, 10), gaps[0]);
+        Assert.Equal(new TaskbarLayout.Span(40, 60), gaps[1]);
+        Assert.Equal(new TaskbarLayout.Span(70, 100), gaps[2]);
+    }
+
+    // T19：默认位空闲就用默认位；被占则退到最靠右的空隙；都放不下返回 false
+    [Fact]
+    public void TryPlaceAlong_DefaultThenRightmostGap()
+    {
+        var none = Array.Empty<TaskbarLayout.Span>();
+
+        Assert.True(TaskbarLayout.TryPlaceAlong(0, 100, 20, 5, none, out int free));
+        Assert.Equal(100 - 20 - 5, free);
+
+        // 挡住默认位：退到它左边最靠右的空隙
+        Assert.True(TaskbarLayout.TryPlaceAlong(0, 100, 20, 5, new[] { new TaskbarLayout.Span(70, 100) }, out int left));
+        Assert.Equal(70 - 20 - 5, left);
+
+        // 整条被占：放不下
+        Assert.False(TaskbarLayout.TryPlaceAlong(0, 100, 20, 5, new[] { new TaskbarLayout.Span(0, 100) }, out _));
+    }
+
+    // T20：酷狗任务栏歌词这类浮窗占住贴托盘的位置时，贴片退到它左边，不叠字
+    [Fact]
+    public void PlaceAvoiding_FloatingWindowOnTray_SlidesLeft()
+    {
+        // 本机实测：托盘左缘 1573，歌词窗 1373~1573，任务按钮 55~587
+        var tray = new PixelRect(1573, 1032, 347, 48);
+        var lyric = new PixelRect(1373, 1032, 200, 48);
+        var taskButtons = new PixelRect(55, 1032, 532, 48);
+
+        var p = TaskbarLayout.PlaceAvoiding(
+            BottomTaskbar, tray, 97, 36, 0, 6, new[] { lyric, taskButtons });
+
+        Assert.Equal(1373 - 97 - 6, p.X);   // 1270：贴着歌词窗左边 6px
+        Assert.True(p.Fits);
+        Assert.Equal(0, p.Offset);          // 偏移相对新锚点记账
+    }
+
+    // T21：用户拖出来的相对位置要跟着新锚点走，不能因为避让就丢掉
+    [Fact]
+    public void PlaceAvoiding_OffsetIsRelativeToMovedAnchor()
+    {
+        var tray = new PixelRect(1573, 1032, 347, 48);
+        var lyric = new PixelRect(1373, 1032, 200, 48);
+
+        var p = TaskbarLayout.PlaceAvoiding(BottomTaskbar, tray, 97, 36, 50, 6, new[] { lyric });
+
+        Assert.Equal(1373 - 97 - 6 + 50, p.X);
+    }
+
+    // T22：台数状态机——放得下就不动，放不下逐档收窄，宽裕时逐档放宽，一台都放不下返回 0
+    [Fact]
+    public void NextDeviceCount_KeepsNarrowsWidens()
+    {
+        bool[] threeOk = [false, true, true, true];
+        Assert.Equal(3, TaskbarLayout.NextDeviceCount(3, 3, threeOk));      // 现状不动
+        Assert.Equal(3, TaskbarLayout.NextDeviceCount(2, 3, threeOk));      // 还能放宽
+
+        bool[] onlyTwo = [false, true, true, false];
+        Assert.Equal(2, TaskbarLayout.NextDeviceCount(3, 3, onlyTwo));      // 收窄一档
+        Assert.Equal(2, TaskbarLayout.NextDeviceCount(1, 3, onlyTwo));      // 放宽一档
+
+        bool[] onlyOne = [false, true, false, false];
+        Assert.Equal(1, TaskbarLayout.NextDeviceCount(3, 3, onlyOne));      // 收到 1 台
+        Assert.Equal(1, TaskbarLayout.NextDeviceCount(1, 3, onlyOne));      // 只有 1 台放得下
+
+        bool[] none = [false, false, false, false];
+        Assert.Equal(0, TaskbarLayout.NextDeviceCount(1, 3, none));         // 一台都放不下
+    }
+
+    private static readonly PixelRect[] NoOccupancy = Array.Empty<PixelRect>();
 }
 
 /// <summary>任务栏贴片的两个设置项收敛（T10–T12）：手改坏了的 settings.json 不能把界面带崩。</summary>

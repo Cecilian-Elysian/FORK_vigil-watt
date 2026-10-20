@@ -12,6 +12,8 @@
 
 任务栏贴片是原生子窗口 `Services/TaskbarPillWindow.cs`（`SetParent` 进 `Shell_TrayWnd`），不是 WinUI 覆盖窗。小组件仍用 `TransparentWindowSurface`；Win10 上因此没有 DWM 投影（BACKLOG **CR-57**，未做）。旧覆盖窗的白框、裁字、抢 Z 序在新贴片上已不存在。原理见 `dev/runtime-pitfalls.md` §16；§17 只对小组件。
 
+贴片会避让别的任务栏工具：每拍枚举任务栏占位（**含顶层浮窗**，酷狗任务栏歌词就是浮窗），退到能放下的最靠右空隙，放不下就逐档减显示台数，连 1 台都放不下则整体隐藏。**不收窄任务列表**（两个工具同时收窄会来回跳）。见 `dev/runtime-pitfalls.md` §16.11。
+
 页面已缓存（`NavigationCacheMode = Required`），订阅跟 `Loaded`/`Unloaded`。设置页可搜索。日志按日：`logs\app-日期.log`。插件开关即写入授权，没有第二套「写入许可」。
 
 设备列表支持外设右键自定义名称与图标，按设备 ID 持久化；实时展示读取展示快照，历史页面用当前自定义名，已有采样不改写，后续采样保留自定义名称。
@@ -59,7 +61,7 @@
 2. **雷柏充满**：放电 0x01、充电 0x02 已校准。充满时 `[7]` 还没采到，采到再补映射。
 3. **迈从 QHW**（3837:3033）已实现，遇到再验证。
 4. **北通鲲鹏20**（PID_5191）主动查询未真机验证。T9 的 `byte23` 低位仍只认 `0x50` = 未连接；验证方法见 protocols.md §4.4.1。
-5. **贴片人手复看**：拖动与位置记忆（CR-48）、自动隐藏、竖向/多屏（CR-41）、深色对比（CR-42）、是否压住任务栏按钮（CR-39）、右键菜单（CR-58/CR-60）、悬停设备名（多台/底栏/深色任务栏）。分辨率往返已于 2026-10-13 通过。Win10 小组件投影（CR-57）等用户决定是否做。
+5. **贴片人手复看**：拖动与位置记忆（CR-48）、自动隐藏、竖向/多屏（CR-41）、深色对比（CR-42）、是否压住任务栏按钮（CR-39）、右键菜单（CR-58/CR-60）、悬停设备名（多台/底栏/深色任务栏）。分辨率往返已于 2026-10-13 通过。Win10 小组件投影（CR-57）等用户决定是否做。**新增（10-20）避让**：开着酷狗任务栏歌词 / TrafficMonitor 时贴片是否真的不叠字、拖动后位置记忆是否稳、减台数与恢复台数是否跳。
 6. **CR-53 真机**：迈从键盘睡够 3 分钟再唤醒，日志应在 1 分钟内出现重新上线。表在 `Plugins/WriteBackoff.cs`。
 7. **页面缓存真机**：来回切换是否变快、离开再回来数据是否仍刷新、设置值是否与 `settings.json` 一致、搜索是否仍可用。坑见 `dev/runtime-pitfalls.md` §19。相关未修项 CR-61 / CR-62 / CR-63。
 8. **启动更新确认框**：本轮只验到"托盘气泡 + 日志发现新版本"（`StartMinimized=true`，窗口没开）。打开主窗口应弹「发现新版本」确认框，未真机确认。
@@ -95,7 +97,7 @@
 | 轮询 / 采样 | `Devices/DeviceManager.cs`（code-flow.md） |
 | 经典蓝牙 | `Ble/BluetoothClassicWatcher.cs`、`Ble/ClassicDevNodeReader.cs` |
 | 本机电量 | `Power/SystemPowerReader.cs`、`Power/SystemBatteryWatcher.cs`。托盘在 `TrayService.Render` 里跳过 `DeviceSource.System` |
-| 任务栏贴片 | `Services/TaskbarPillWindow.cs`、`TaskbarPillRenderer.cs`、`TaskbarLayout.cs`。原理 runtime-pitfalls.md §16 |
+| 任务栏贴片 | `Services/TaskbarPillWindow.cs`、`TaskbarPillRenderer.cs`、`TaskbarLayout.cs`、`TaskbarOccupancy.cs`。原理 runtime-pitfalls.md §16 |
 | 小组件透明 | `Services/TransparentWindowSurface.cs`。贴片不用它。见 §17 |
 | 设备图标 | `Services/DeviceIconFactory.cs`（不要用字体图标） |
 | 程序图标 | `scripts/make-app-icon.py` → `Assets/VigilWatt.ico`；csproj `ApplicationIcon` 和 `MainWindow.ApplyWindowIcon` 都要 |

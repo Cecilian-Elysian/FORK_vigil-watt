@@ -22,7 +22,6 @@ public static class TaskbarPillRenderer
     private const double DividerW = 1, DividerH = 14;
     private const double PercentFontSize = 13;
     private const double EmptyFontSize = 12;
-    private const double EmptyTextWidthDip = 104;
 
     /// <summary>宽度余量（像素）：字宽量出来差一两个像素就会把最右一格挤出窗口（历史事故）。</summary>
     private const int SlackPx = 8;
@@ -80,7 +79,24 @@ public static class TaskbarPillRenderer
         return bmp;
     }
 
-    private enum PieceKind { Chip, Divider, Overflow, Empty }
+    /// <summary>
+    /// 量出这组设备画出来有多宽（不落位图）。比 <see cref="Render"/> 返回的宽度略大（含余量），
+    /// 只用来判断"放不放得下"，真实落位仍用渲染后的宽度。
+    /// </summary>
+    public static int MeasureWidth(
+        IReadOnlyList<DeviceStatus> devices, IReadOnlyList<string> overflowNames, float scale)
+    {
+        using var percentFont = new Gdi.Font("Microsoft YaHei UI", (float)(PercentFontSize * scale), Gdi.FontStyle.Bold, Gdi.GraphicsUnit.Pixel);
+        using var plainFont = new Gdi.Font("Microsoft YaHei UI", (float)(EmptyFontSize * scale), Gdi.FontStyle.Regular, Gdi.GraphicsUnit.Pixel);
+        using var sf = (Gdi.StringFormat)Gdi.StringFormat.GenericTypographic.Clone();
+        sf.FormatFlags |= Gdi.StringFormatFlags.NoWrap | Gdi.StringFormatFlags.MeasureTrailingSpaces;
+        sf.LineAlignment = Gdi.StringAlignment.Center;
+
+        var pieces = BuildPieces(devices, overflowNames, scale, percentFont, plainFont, sf, out float contentW);
+        return (int)Math.Ceiling(contentW + PadH * 2 * scale) + SlackPx;
+    }
+
+    private enum PieceKind { Chip, Divider, Overflow }
 
     private readonly record struct Piece(PieceKind Kind, DeviceStatus? Device, int Overflow, string? OverflowTip, float X, float Width);
 
@@ -92,36 +108,27 @@ public static class TaskbarPillRenderer
         float x = 0;
         int overflow = overflowNames.Count;
 
-        if (devices.Count == 0)
+        for (int i = 0; i < devices.Count; i++)
         {
-            float w = (float)(EmptyTextWidthDip * scale);
-            pieces.Add(new Piece(PieceKind.Empty, null, 0, null, x, w));
-            x += w;
-        }
-        else
-        {
-            for (int i = 0; i < devices.Count; i++)
-            {
-                if (i > 0)
-                {
-                    x += (float)(IconTextGap * scale);
-                    pieces.Add(new Piece(PieceKind.Divider, null, 0, null, x, (float)(DividerW * scale)));
-                    x += (float)(DividerW * scale) + (float)(IconTextGap * scale);
-                }
-                float w = ChipWidth(devices[i], scale, percentFont, sf);
-                pieces.Add(new Piece(PieceKind.Chip, devices[i], 0, null, x, w));
-                x += w;
-            }
-            if (overflow > 0)
+            if (i > 0)
             {
                 x += (float)(IconTextGap * scale);
                 pieces.Add(new Piece(PieceKind.Divider, null, 0, null, x, (float)(DividerW * scale)));
                 x += (float)(DividerW * scale) + (float)(IconTextGap * scale);
-                float w = Measure(MeasureG, $"+{overflow}", plainFont, sf);
-                string tip = string.Join("\n", overflowNames);
-                pieces.Add(new Piece(PieceKind.Overflow, null, overflow, tip, x, w));
-                x += w;
             }
+            float w = ChipWidth(devices[i], scale, percentFont, sf);
+            pieces.Add(new Piece(PieceKind.Chip, devices[i], 0, null, x, w));
+            x += w;
+        }
+        if (overflow > 0)
+        {
+            x += (float)(IconTextGap * scale);
+            pieces.Add(new Piece(PieceKind.Divider, null, 0, null, x, (float)(DividerW * scale)));
+            x += (float)(DividerW * scale) + (float)(IconTextGap * scale);
+            float w = Measure(MeasureG, $"+{overflow}", plainFont, sf);
+            string tip = string.Join("\n", overflowNames);
+            pieces.Add(new Piece(PieceKind.Overflow, null, overflow, tip, x, w));
+            x += w;
         }
 
         contentWidth = x;
@@ -177,10 +184,6 @@ public static class TaskbarPillRenderer
                 case PieceKind.Divider:
                     using (var b = new Gdi.SolidBrush(skin.Divider))
                         g.FillRectangle(b, x, (heightPx - (float)(DividerH * scale)) / 2f, (float)(DividerW * scale), (float)(DividerH * scale));
-                    break;
-
-                case PieceKind.Empty:
-                    DrawText(g, "暂无在线设备", plainFont, Fade(skin.Text, 0.6f), new Gdi.RectangleF(x, 0, piece.Width, heightPx), sf);
                     break;
 
                 case PieceKind.Overflow:
