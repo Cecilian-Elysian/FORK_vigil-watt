@@ -208,15 +208,17 @@ public class TaskbarLayoutTests
     {
         var none = Array.Empty<TaskbarLayout.Span>();
 
-        Assert.True(TaskbarLayout.TryPlaceAlong(0, 100, 20, 5, none, out int free));
+        Assert.True(TaskbarLayout.TryPlaceAlong(0, 100, 20, 5, none, out int free, out int slack));
         Assert.Equal(100 - 20 - 5, free);
+        Assert.Equal(75, slack);              // 左边还能长 75px
 
         // 挡住默认位：退到它左边最靠右的空隙
-        Assert.True(TaskbarLayout.TryPlaceAlong(0, 100, 20, 5, new[] { new TaskbarLayout.Span(70, 100) }, out int left));
+        Assert.True(TaskbarLayout.TryPlaceAlong(0, 100, 20, 5, new[] { new TaskbarLayout.Span(70, 100) }, out int left, out int leftSlack));
         Assert.Equal(70 - 20 - 5, left);
+        Assert.Equal(45, leftSlack);
 
         // 整条被占：放不下
-        Assert.False(TaskbarLayout.TryPlaceAlong(0, 100, 20, 5, new[] { new TaskbarLayout.Span(0, 100) }, out _));
+        Assert.False(TaskbarLayout.TryPlaceAlong(0, 100, 20, 5, new[] { new TaskbarLayout.Span(0, 100) }, out _, out _));
     }
 
     // T20：酷狗任务栏歌词这类浮窗占住贴托盘的位置时，贴片退到它左边，不叠字
@@ -252,20 +254,33 @@ public class TaskbarLayoutTests
     [Fact]
     public void NextDeviceCount_KeepsNarrowsWidens()
     {
-        bool[] threeOk = [false, true, true, true];
-        Assert.Equal(3, TaskbarLayout.NextDeviceCount(3, 3, threeOk));      // 现状不动
-        Assert.Equal(3, TaskbarLayout.NextDeviceCount(2, 3, threeOk));      // 还能放宽
+        TaskbarLayout.Fit[] threeOk = [default, new(true, 100), new(true, 100), new(true, 100)];
+        Assert.Equal(3, TaskbarLayout.NextDeviceCount(3, 3, threeOk, 10));      // 现状不动
+        Assert.Equal(3, TaskbarLayout.NextDeviceCount(2, 3, threeOk, 10));      // 还能放宽
 
-        bool[] onlyTwo = [false, true, true, false];
-        Assert.Equal(2, TaskbarLayout.NextDeviceCount(3, 3, onlyTwo));      // 收窄一档
-        Assert.Equal(2, TaskbarLayout.NextDeviceCount(1, 3, onlyTwo));      // 放宽一档
+        TaskbarLayout.Fit[] onlyTwo = [default, new(true, 100), new(true, 100), new(false, 0)];
+        Assert.Equal(2, TaskbarLayout.NextDeviceCount(3, 3, onlyTwo, 10));      // 收窄一档
+        Assert.Equal(2, TaskbarLayout.NextDeviceCount(1, 3, onlyTwo, 10));      // 放宽一档
 
-        bool[] onlyOne = [false, true, false, false];
-        Assert.Equal(1, TaskbarLayout.NextDeviceCount(3, 3, onlyOne));      // 收到 1 台
-        Assert.Equal(1, TaskbarLayout.NextDeviceCount(1, 3, onlyOne));      // 只有 1 台放得下
+        TaskbarLayout.Fit[] onlyOne = [default, new(true, 100), new(false, 0), new(false, 0)];
+        Assert.Equal(1, TaskbarLayout.NextDeviceCount(3, 3, onlyOne, 10));      // 收到 1 台
+        Assert.Equal(1, TaskbarLayout.NextDeviceCount(1, 3, onlyOne, 10));      // 只有 1 台放得下
 
-        bool[] none = [false, false, false, false];
-        Assert.Equal(0, TaskbarLayout.NextDeviceCount(1, 3, none));         // 一台都放不下
+        TaskbarLayout.Fit[] none = [default, new(false, 0), new(false, 0), new(false, 0)];
+        Assert.Equal(0, TaskbarLayout.NextDeviceCount(1, 3, none, 10));         // 一台都放不下
+    }
+
+    // T23：放宽要留余量——宽度卡在临界值时台数不能来回横跳（10Hz 扫描下会闪）
+    [Fact]
+    public void NextDeviceCount_WidenNeedsMargin()
+    {
+        // 第二台放得下但只剩 3px 余量：不够 margin，不放宽
+        TaskbarLayout.Fit[] tight = [default, new(true, 50), new(true, 3), new(false, 0)];
+        Assert.Equal(1, TaskbarLayout.NextDeviceCount(1, 3, tight, 10));
+
+        // 余量够了：放宽
+        TaskbarLayout.Fit[] roomy = [default, new(true, 50), new(true, 30), new(false, 0)];
+        Assert.Equal(2, TaskbarLayout.NextDeviceCount(1, 3, roomy, 10));
     }
 
     private static readonly PixelRect[] NoOccupancy = Array.Empty<PixelRect>();

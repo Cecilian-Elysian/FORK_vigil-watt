@@ -17,7 +17,9 @@ public sealed class TaskbarPillWindow : IDisposable
     private const string ClassName = "VigilWattTaskbarPill";
     private const string TipClassName = "VigilWattTaskbarPillTip";
     private const string WindowTitle = "VigilWatt 任务栏电量";
-    private const int FollowIntervalMs = 1000;
+
+    /// <summary>跟随节拍：邻窗（酷狗歌词等）会带动画地变宽变窄，扫描太慢贴片就跟得像在跳。</summary>
+    private const int FollowIntervalMs = 100;
 
     private const double MinHeightDip = 22, MaxHeightDip = 40;
     private const double TaskbarMarginDip = 6;
@@ -81,6 +83,11 @@ public sealed class TaskbarPillWindow : IDisposable
 
     /// <summary>上一拍的落点：贴片绝对坐标与当拍锚点，拖动结束时用它反推用户偏移。</summary>
     private int _lastX, _lastY, _lastAnchor;
+
+    /// <summary>位图版本：每次重绘 +1，配合下面的"已贴"记录判断要不要重贴。</summary>
+    private int _bitmapVersion;
+
+    private int _uploadedX = int.MinValue, _uploadedY = int.MinValue, _uploadedW = -1, _uploadedVersion = -1;
 
     public TaskbarPillWindow()
     {
@@ -287,6 +294,10 @@ public sealed class TaskbarPillWindow : IDisposable
         _pillVisible = false;
         _widthsByCount = Array.Empty<int>();
         _widthKey = "";
+        _uploadedX = int.MinValue;
+        _uploadedY = int.MinValue;
+        _uploadedW = -1;
+        _uploadedVersion = -1;
     }
 
     /// <summary>贴片整体隐藏：没有在线设备、或被别的工具挤到连一台都放不下时。</summary>
@@ -295,6 +306,7 @@ public sealed class TaskbarPillWindow : IDisposable
         if (_pillVisible)
         {
             _pillVisible = false;
+            _uploadedVersion = -1;   // 重新显示时必须重贴一次
             if (_hwnd != IntPtr.Zero && Native.IsWindow(_hwnd)) Native.ShowWindow(_hwnd, Native.SW_HIDE);
         }
         HideTip();
@@ -371,7 +383,7 @@ public sealed class TaskbarPillWindow : IDisposable
 
         int userMax = TaskbarBatteryOptions.Clamp(App.Services.Settings.TaskbarBatteryMaxDevices);
         EnsureWidths(_picked, userMax);
-        int count = TaskbarLayout.NextDeviceCount(_shownCount, userMax, BuildFits(userMax));
+        int count = TaskbarLayout.NextDeviceCount(_shownCount, userMax, BuildFits(userMax), GapPx);
         if (count == 0)
         {
             // 连 1 台都放不下：宁可先不显示，也不叠到别的工具上面
@@ -429,6 +441,7 @@ public sealed class TaskbarPillWindow : IDisposable
         _pillW = width;
         _hits = hits;
         _needRender = false;
+        _bitmapVersion++;
 
         // 电量刷新很勤：同一台仍在鼠标下则只重摆位置，不重新计悬停
         if (_tipVisible && _shownTipId != null)
@@ -483,26 +496,30 @@ public sealed class TaskbarPillWindow : IDisposable
         _widthsByCount = widths;
     }
 
-    /// <summary>各台数放不放得下（横竖任务栏各按自己的轴算）。</summary>
-    private bool[] BuildFits(int userMax)
+    /// <summary>各台数放不放得下（横竖任务栏各按自己的轴算），连同还能往宽了长的余量。</summary>
+    private TaskbarLayout.Fit[] BuildFits(int userMax)
     {
         int max = Math.Min(userMax, _widthsByCount.Length - 1);
-        var fits = new bool[max + 1];
+        var fits = new TaskbarLayout.Fit[max + 1];
         var (bandMin, bandMax) = TaskbarLayout.Band(_taskbarRect, _trayRect, _taskbarHorizontal);
         var spans = TaskbarLayout.ProjectSpans(_occupancy, _taskbarRect, _taskbarHorizontal);
-        int gap = (int)Math.Round(EdgeGapDip * Scale);
         for (int k = 1; k <= max; k++)
         {
-            fits[k] = TaskbarLayout.TryPlaceAlong(bandMin, bandMax, _widthsByCount[k], gap, spans, out _);
+            bool placed = TaskbarLayout.TryPlaceAlong(
+                bandMin, bandMax, _widthsByCount[k], GapPx, spans, out _, out int slack);
+            fits[k] = new TaskbarLayout.Fit(placed, placed ? slack : 0);
         }
         return fits;
     }
+
+    /// <summary>贴片与邻窗、托盘之间留的缝（物理像素）。</summary>
+    private int GapPx => (int)Math.Round(EdgeGapDip * Scale);
 
     private void ApplyPosition()
     {
         if (_bitmap == null || _pillW == 0 || _pillH == 0) return;
 
-        int gap = (int)Math.Round(EdgeGapDip * Scale);
+        int gap = GapPx;
         int placeOffset = OffsetForCurrentDpi(out _);
         var place = TaskbarLayout.PlaceAvoiding(
             _taskbarRect, _trayRect, _pillW, _pillH, placeOffset, gap, _occupancy);
@@ -531,10 +548,20 @@ public sealed class TaskbarPillWindow : IDisposable
         _lastY = y;
         _lastAnchor = _taskbarHorizontal ? place.X - place.Offset : place.Y - place.Offset;
 
+        // 位置和位图都没变就别重贴：扫描是 10Hz，每拍都 UpdateLayeredWindow 纯属白费
+        if (x == _uploadedX && y == _uploadedY && _pillW == _uploadedW && _bitmapVersion == _uploadedVersion)
+        {
+            return;
+        }
+
         // 子窗口的坐标是**相对父窗口客户区**的，定位数学算出来的是屏幕坐标，这里换算一次
         var pt = new Native.POINT { X = x, Y = y };
         Native.ScreenToClient(_taskbar, ref pt);
         Upload(pt.X, pt.Y);
+        _uploadedX = x;
+        _uploadedY = y;
+        _uploadedW = _pillW;
+        _uploadedVersion = _bitmapVersion;
     }
 
     /// <summary>把记下的偏移换算成当前任务栏 DPI 下的物理像素；旧配置 Dpi=0 时首次只绑定、不改像素。</summary>

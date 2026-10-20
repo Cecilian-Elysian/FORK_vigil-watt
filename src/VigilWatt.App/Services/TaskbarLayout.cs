@@ -55,7 +55,7 @@ public static class TaskbarLayout
         if (horizontal)
         {
             var (bandMin, bandMax) = Band(taskbar, tray, true);
-            bool fits = TryPlaceAlong(bandMin, bandMax, pillW, gapPx, spans, out int anchor);
+            bool fits = TryPlaceAlong(bandMin, bandMax, pillW, gapPx, spans, out int anchor, out _);
             if (!fits) anchor = bandMax - pillW - gapPx;
             int min = taskbar.Left + EdgeInsetPx;
             int max = Math.Max(min, taskbar.Right - pillW - EdgeInsetPx);
@@ -65,7 +65,7 @@ public static class TaskbarLayout
         }
 
         var (bandMinV, bandMaxV) = Band(taskbar, tray, false);
-        bool fitsV = TryPlaceAlong(bandMinV, bandMaxV, pillH, gapPx, spans, out int anchorY);
+        bool fitsV = TryPlaceAlong(bandMinV, bandMaxV, pillH, gapPx, spans, out int anchorY, out _);
         if (!fitsV) anchorY = bandMaxV - pillH - gapPx;
         int minY = taskbar.Top + EdgeInsetPx;
         int maxY = Math.Max(minY, taskbar.Bottom - pillH - EdgeInsetPx);
@@ -131,30 +131,46 @@ public static class TaskbarLayout
     /// <summary>
     /// 在轴上落位：默认位（贴 bandMax 端）空闲就用它；被占则退到能放下的最靠右空隙。
     /// 空隙窄到放不下时返回 false，由调用方决定收窄内容还是隐藏。
+    /// <paramref name="slack"/> 是贴片左边还剩多少空隙（往宽了长会往左长，这就是能长的余量）。
     /// </summary>
     public static bool TryPlaceAlong(
-        int bandMin, int bandMax, int length, int gapPx, IReadOnlyList<Span> occupied, out int pos)
+        int bandMin, int bandMax, int length, int gapPx, IReadOnlyList<Span> occupied,
+        out int pos, out int slack)
     {
         pos = 0;
+        slack = 0;
         if (bandMax - bandMin < length) return false;
+
+        var gaps = FreeGaps(bandMin, bandMax, occupied);
 
         int def = bandMax - length - gapPx;
         if (def >= bandMin && !Overlaps(def, def + length, occupied))
         {
             pos = def;
+            slack = SlackToLeft(gaps, def);
             return true;
         }
 
-        var gaps = FreeGaps(bandMin, bandMax, occupied);
         for (int i = gaps.Count - 1; i >= 0; i--)
         {
             int x = gaps[i].Right - length - gapPx;
             if (x < gaps[i].Left) x = gaps[i].Left;
             if (x + length > gaps[i].Right) continue;
             pos = x;
+            slack = x - gaps[i].Left;
             return true;
         }
         return false;
+    }
+
+    /// <summary>贴片左边缘到所在空隙左边缘的距离：往宽了长就往左长，这是还剩多少余量。</summary>
+    private static int SlackToLeft(List<Span> gaps, int x)
+    {
+        foreach (var g in gaps)
+        {
+            if (x >= g.Left && x < g.Right) return x - g.Left;
+        }
+        return 0;
     }
 
     /// <summary>区间 [a0, a1) 与任一占位区间相交。</summary>
@@ -167,28 +183,33 @@ public static class TaskbarLayout
         return false;
     }
 
+    /// <summary>某个台数放不放得下，以及放下后左边还剩多少余量（往宽了长就往左长）。</summary>
+    public readonly record struct Fit(bool Fits, int Slack);
+
     /// <summary>
     /// 选显示几台设备：现状放得下就保持（否则每秒重算会抖），放不下逐档收窄到 1 台，
     /// 宽裕时逐档放宽。返回 0 表示连 1 台都放不下，调用方应当隐藏贴片。
+    /// 放宽要留出 <paramref name="widenMarginPx"/> 余量，否则宽度卡在临界值时台数会来回横跳。
     /// </summary>
-    public static int NextDeviceCount(int current, int userMax, IReadOnlyList<bool> fits)
+    public static int NextDeviceCount(int current, int userMax, IReadOnlyList<Fit> fits, int widenMarginPx)
     {
         if (fits.Count < 2) return 0;
-        bool Fits(int k) => k >= 0 && k < fits.Count && fits[k];
-
         int max = Math.Clamp(userMax, 1, fits.Count - 1);
         if (current < 1) current = 1;
         if (current > max) current = max;
 
-        if (!Fits(current))
+        if (!fits[current].Fits)
         {
             for (int k = current - 1; k >= 1; k--)
             {
-                if (Fits(k)) return k;
+                if (fits[k].Fits) return k;
             }
             return 0;
         }
-        if (current < max && Fits(current + 1)) return current + 1;
+        if (current < max && fits[current + 1].Fits && fits[current + 1].Slack >= widenMarginPx)
+        {
+            return current + 1;
+        }
         return current;
     }
 
