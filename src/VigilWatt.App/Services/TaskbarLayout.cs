@@ -129,6 +129,17 @@ public static class TaskbarLayout
     }
 
     /// <summary>
+    /// 用采样到的内容左缘收窄浮窗占位：酷狗悬停切控件时窗口矩形不变、内容右对齐，按窗口矩形
+    /// 避让会留一段空白。采样失败（null）或落在窗外（噪声）原样返回，占位只会收窄不会放大。
+    /// </summary>
+    public static PixelRect RefineByContent(PixelRect windowRect, int? contentLeftX)
+    {
+        if (contentLeftX is int x && x > windowRect.Left && x < windowRect.Right)
+            return new PixelRect(x, windowRect.Top, windowRect.Right - x, windowRect.Height);
+        return windowRect;
+    }
+
+    /// <summary>
     /// 在轴上落位：默认位（贴 bandMax 端）空闲就用它；被占则退到能放下的最靠右空隙。
     /// 空隙窄到放不下时返回 false，由调用方决定收窄内容还是隐藏。
     /// <paramref name="slack"/> 是贴片左边还剩多少空隙（往宽了长会往左长，这就是能长的余量）。

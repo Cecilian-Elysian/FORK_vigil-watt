@@ -490,4 +490,19 @@ internal static class Native
 
     [DllImport("gdi32.dll")]
     public static extern bool DeleteDC(IntPtr hdc);
+
+    // ---- 占位窗内容采样（贴片避让）----
+    // 酷狗这类浮窗窗口矩形不变、只换画的内容（悬停在歌词/控件间切换），按窗口矩形避让会在
+    // 控件态留一大段空白；得把屏幕像素读回来找内容真实边界（采样方见 TaskbarOccupancy）。
+    public const uint SRCCOPY = 0x00CC0020;
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr GetDC(IntPtr hwnd);
+
+    [DllImport("user32.dll")]
+    public static extern int ReleaseDC(IntPtr hwnd, IntPtr hdc);
+
+    [DllImport("gdi32.dll")]
+    public static extern bool BitBlt(
+        IntPtr hdcDest, int x, int y, int width, int height, IntPtr hdcSrc, int xSrc, int ySrc, uint rop);
 }

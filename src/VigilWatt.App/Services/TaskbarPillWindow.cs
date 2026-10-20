@@ -78,6 +78,9 @@ public sealed class TaskbarPillWindow : IDisposable
     /// <summary>任务栏条带上的占位矩形（别的工具占着的地方）。</summary>
     private List<PixelRect> _occupancy = new();
 
+    /// <summary>同上，但未做内容收窄：判断"光标悬在哪个工具窗口上"要用完整矩形。</summary>
+    private readonly List<PixelRect> _fullOccupancy = new();
+
     /// <summary>本轮参与显示的在线设备（已按优先级排好序）。</summary>
     private List<DeviceStatus> _picked = new();
 
@@ -372,7 +375,8 @@ public sealed class TaskbarPillWindow : IDisposable
             }
         }
 
-        _occupancy = TaskbarOccupancy.Collect(_taskbarRect, _taskbar, _hwnd, Environment.ProcessId);
+        _fullOccupancy.Clear();
+        _occupancy = TaskbarOccupancy.Collect(_taskbarRect, _taskbar, _hwnd, Environment.ProcessId, _fullOccupancy);
 
         _picked = PickDevices();
         if (_picked.Count == 0)
@@ -541,6 +545,21 @@ public sealed class TaskbarPillWindow : IDisposable
                 int min = _taskbarRect.Top + TaskbarLayout.EdgeInsetPx;
                 int max = Math.Max(min, _taskbarRect.Bottom - _pillH - TaskbarLayout.EdgeInsetPx);
                 y = Math.Clamp(_dragStartY + delta, min, max);
+            }
+        }
+        else if (_taskbarHorizontal)
+        {
+            // 光标悬在占位窗上说明在操作那个工具：贴片盖住光标，对方就收不到鼠标、悬停态翻转
+            // （酷狗控件↔歌词），贴片"贴了又退"来回闪。这一拍整体让出该窗完整矩形，光标挪开再贴。
+            var cursor = Native.GetCursorPos();
+            foreach (var w in _fullOccupancy)
+            {
+                if (cursor.X >= w.Left && cursor.X < w.Right && cursor.Y >= w.Top && cursor.Y < w.Bottom)
+                {
+                    int min = _taskbarRect.Left + TaskbarLayout.EdgeInsetPx;
+                    x = Math.Max(Math.Min(x, w.Left - gap - _pillW), min);
+                    break;
+                }
             }
         }
 
