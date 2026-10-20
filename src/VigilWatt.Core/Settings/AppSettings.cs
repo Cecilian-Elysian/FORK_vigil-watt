@@ -46,12 +46,6 @@ public class AppSettings
     /// <summary>任务栏贴片最多显示几台设备，超出显示 "+N"。合法范围见 <c>VigilWatt.App.Services.TaskbarBatteryOptions</c>（1~5，默认 3）。</summary>
     public int TaskbarBatteryMaxDevices { get; set; } = 3;
 
-    /// <summary>任务栏贴片相对"托盘左侧默认位"的水平偏移（物理像素，正数向右）。用户拖动后写入，重启沿用。</summary>
-    public int TaskbarBatteryOffsetX { get; set; }
-
-    /// <summary>记下 <see cref="TaskbarBatteryOffsetX"/> 时任务栏的 DPI（96=100%）。0 = 旧配置尚未绑定，首次读到任务栏 DPI 时只记数不改像素。</summary>
-    public int TaskbarBatteryOffsetDpi { get; set; }
-
     public bool StartMinimized { get; set; } = true;
 
     /// <summary>窗口背景材质。取值见 <c>VigilWatt.App.Services.WindowBackdrop</c>：Auto（跟随系统能力）/ Mica（云母，仅 Win11，不满足自动降级）/ Acrylic（磨砂，Win10 1809+）/ Solid（纯色分层底）；未知取值按 Auto。</summary>

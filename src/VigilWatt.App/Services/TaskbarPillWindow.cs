@@ -46,12 +46,7 @@ public sealed class TaskbarPillWindow : IDisposable
     private int _tipDibW, _tipDibH;
     private Gdi.Bitmap? _bitmap;
     private int _pillW, _pillH;
-    private int _offsetPx;
-    private int _offsetDpi;
     private uint _windowDpi;
-    private bool _dragging;
-    private int _dragStartCursor;
-    private int _dragStartX, _dragStartY;
     private bool _taskbarHorizontal = true;
     private PixelRect _taskbarRect, _trayRect;
     private int _refreshQueued;
@@ -75,7 +70,7 @@ public sealed class TaskbarPillWindow : IDisposable
 
     private string _widthKey = "";
 
-    /// <summary>任务栏条带上的占位矩形（别的工具占着的地方）。</summary>
+    /// <summary>落位与台数计算的占位：窗口枚举（第三方工具）+ UIA（系统 XAML UI）合并结果。</summary>
     private List<PixelRect> _occupancy = new();
 
     /// <summary>同上，但未做内容收窄：判断"光标悬在哪个工具窗口上"要用完整矩形。</summary>
@@ -83,9 +78,6 @@ public sealed class TaskbarPillWindow : IDisposable
 
     /// <summary>本轮参与显示的在线设备（已按优先级排好序）。</summary>
     private List<DeviceStatus> _picked = new();
-
-    /// <summary>上一拍的落点：贴片绝对坐标与当拍锚点，拖动结束时用它反推用户偏移。</summary>
-    private int _lastX, _lastY, _lastAnchor;
 
     /// <summary>位图版本：每次重绘 +1，配合下面的"已贴"记录判断要不要重贴。</summary>
     private int _bitmapVersion;
@@ -95,7 +87,9 @@ public sealed class TaskbarPillWindow : IDisposable
     public TaskbarPillWindow()
     {
         _current = this;
-        LoadOffsetFromSettings();
+
+        // UIA 读任务栏 XAML 元素：后台线程自跑 500ms 一拍，本类只读它的快照
+        TaskbarXamlRects.Start();
 
         EnsureWindow();
 
@@ -109,13 +103,6 @@ public sealed class TaskbarPillWindow : IDisposable
         _timer.Start();
 
         Update();
-    }
-
-    private void LoadOffsetFromSettings()
-    {
-        var s = App.Services.Settings;
-        _offsetPx = s.TaskbarBatteryOffsetX;
-        _offsetDpi = s.TaskbarBatteryOffsetDpi;
     }
 
     private void OnDeviceUpdated(DeviceStatus _) => RequestRefresh();
@@ -137,7 +124,6 @@ public sealed class TaskbarPillWindow : IDisposable
     /// <summary>设置保存后的即时生效入口（开关/显示内容/最多台数可能都变了）。</summary>
     public void RefreshFromSettings()
     {
-        LoadOffsetFromSettings();
         _needRender = true;
         Update();
     }
@@ -376,7 +362,21 @@ public sealed class TaskbarPillWindow : IDisposable
         }
 
         _fullOccupancy.Clear();
-        _occupancy = TaskbarOccupancy.Collect(_taskbarRect, _taskbar, _hwnd, Environment.ProcessId, _fullOccupancy);
+        var enumerated = TaskbarOccupancy.Collect(_taskbarRect, _taskbar, _hwnd, Environment.ProcessId, _fullOccupancy);
+        // 系统 XAML UI（搜索框/任务按钮/托盘）枚举看不见，矩形只能从 UIA 拿，两者合并成完整占位；
+        // UIA 没数据时（首拍未就绪/锁屏）至少还有枚举结果兜着
+        var xaml = TaskbarXamlRects.Cached;
+        if (xaml.Count == 0)
+        {
+            _occupancy = enumerated;
+        }
+        else
+        {
+            var merged = new List<PixelRect>(enumerated.Count + xaml.Count);
+            merged.AddRange(enumerated);
+            merged.AddRange(xaml);
+            _occupancy = merged;
+        }
 
         _picked = PickDevices();
         if (_picked.Count == 0)
@@ -422,10 +422,13 @@ public sealed class TaskbarPillWindow : IDisposable
             return true;
         }
 
-        // 托盘找不到不算失败：退回用任务栏自身边缘定位，贴片照样显示
+        // 托盘找不到不算失败：退回用任务栏自身边缘定位，贴片照样显示。
+        // 26200 起 TrayNotifyWnd 不再是 Win32 子窗口，锚点改从 UIA 快照拿
         var trayHwnd = Native.FindWindowExW(hwnd, IntPtr.Zero, Native.TrayNotifyClassName, null);
         if (trayHwnd != IntPtr.Zero && Native.GetWindowRect(trayHwnd, out var trayRect))
             tray = new PixelRect(trayRect.Left, trayRect.Top, trayRect.Width, trayRect.Height);
+        else if (TaskbarXamlRects.TryGetTray(out var xamlTray))
+            tray = xamlTray;
         return true;
     }
 
@@ -501,8 +504,7 @@ public sealed class TaskbarPillWindow : IDisposable
     }
 
     /// <summary>各台数放不放得下（横竖任务栏各按自己的轴算），连同还能往宽了长的余量。</summary>
-    private TaskbarLayout.Fit[] BuildFits(int userMax)
-    {
+    private TaskbarLayout.Fit[] BuildFits(int userMax)    {
         int max = Math.Min(userMax, _widthsByCount.Length - 1);
         var fits = new TaskbarLayout.Fit[max + 1];
         var (bandMin, bandMax) = TaskbarLayout.Band(_taskbarRect, _trayRect, _taskbarHorizontal);
@@ -524,48 +526,34 @@ public sealed class TaskbarPillWindow : IDisposable
         if (_bitmap == null || _pillW == 0 || _pillH == 0) return;
 
         int gap = GapPx;
-        int placeOffset = OffsetForCurrentDpi(out _);
+        // 拖动已移除：位置完全由避让决定。PlaceAvoiding 的 offset 参数保留是为了不动落位数学与其单测
         var place = TaskbarLayout.PlaceAvoiding(
-            _taskbarRect, _trayRect, _pillW, _pillH, placeOffset, gap, _occupancy);
+            _taskbarRect, _trayRect, _pillW, _pillH, 0, gap, _occupancy);
 
         int x = place.X, y = place.Y;
-        if (_dragging)
+        if (_taskbarHorizontal)
         {
-            // 拖动中按绝对坐标跟手：锚点这一拍变了也不该把贴片拽走
+            // 光标悬在贴片正贴着/已进入的占位窗上，说明在操作那个工具：贴片盖住光标，对方就
+            // 收不到鼠标、悬停态翻转（酷狗控件↔歌词），贴片"贴了又退"来回闪。这一拍让出该窗。
+            // 右缘须落在该窗范围±2gap 内才算"正贴着"——鼠标扫过搜索框这类远处占位（其 Win32
+            // 宿主矩形罩住半条任务栏）不该把贴片从空隙里拽出去
             var cursor = Native.GetCursorPos();
-            int delta = (_taskbarHorizontal ? cursor.X : cursor.Y) - _dragStartCursor;
-            if (_taskbarHorizontal)
-            {
-                int min = _taskbarRect.Left + TaskbarLayout.EdgeInsetPx;
-                int max = Math.Max(min, _taskbarRect.Right - _pillW - TaskbarLayout.EdgeInsetPx);
-                x = Math.Clamp(_dragStartX + delta, min, max);
-            }
-            else
-            {
-                int min = _taskbarRect.Top + TaskbarLayout.EdgeInsetPx;
-                int max = Math.Max(min, _taskbarRect.Bottom - _pillH - TaskbarLayout.EdgeInsetPx);
-                y = Math.Clamp(_dragStartY + delta, min, max);
-            }
-        }
-        else if (_taskbarHorizontal)
-        {
-            // 光标悬在占位窗上说明在操作那个工具：贴片盖住光标，对方就收不到鼠标、悬停态翻转
-            // （酷狗控件↔歌词），贴片"贴了又退"来回闪。这一拍整体让出该窗完整矩形，光标挪开再贴。
-            var cursor = Native.GetCursorPos();
+            int pillRight = x + _pillW;
             foreach (var w in _fullOccupancy)
             {
-                if (cursor.X >= w.Left && cursor.X < w.Right && cursor.Y >= w.Top && cursor.Y < w.Bottom)
-                {
-                    int min = _taskbarRect.Left + TaskbarLayout.EdgeInsetPx;
-                    x = Math.Max(Math.Min(x, w.Left - gap - _pillW), min);
-                    break;
-                }
+                if (pillRight < w.Left - gap * 2 || pillRight > w.Right + gap * 2) continue;
+                if (cursor.X < w.Left || cursor.X >= w.Right || cursor.Y < w.Top || cursor.Y >= w.Bottom) continue;
+
+                // 让位 = 并入占位重新落位，自然落到该窗左侧第一个合法空隙；
+                // 原先硬钳 x 到 w.Left - pillW 会越过搜索框这类 UIA 占位直接叠上去
+                var guarded = new List<PixelRect>(_occupancy) { w };
+                var rePlaced = TaskbarLayout.PlaceAvoiding(
+                    _taskbarRect, _trayRect, _pillW, _pillH, 0, gap, guarded);
+                x = rePlaced.X;
+                y = rePlaced.Y;
+                break;
             }
         }
-
-        _lastX = x;
-        _lastY = y;
-        _lastAnchor = _taskbarHorizontal ? place.X - place.Offset : place.Y - place.Offset;
 
         // 位置和位图都没变就别重贴：扫描是 10Hz，每拍都 UpdateLayeredWindow 纯属白费
         if (x == _uploadedX && y == _uploadedY && _pillW == _uploadedW && _bitmapVersion == _uploadedVersion)
@@ -581,20 +569,6 @@ public sealed class TaskbarPillWindow : IDisposable
         _uploadedY = y;
         _uploadedW = _pillW;
         _uploadedVersion = _bitmapVersion;
-    }
-
-    /// <summary>把记下的偏移换算成当前任务栏 DPI 下的物理像素；旧配置 Dpi=0 时首次只绑定、不改像素。</summary>
-    private int OffsetForCurrentDpi(out uint currentDpi)
-    {
-        currentDpi = TaskbarDpi();
-        if (currentDpi == 0) currentDpi = 96;
-        if (_offsetDpi <= 0)
-        {
-            _offsetDpi = (int)currentDpi;
-            return _offsetPx;
-        }
-        if (_dragging) return _offsetPx;
-        return TaskbarLayout.ScaleOffset(_offsetPx, (uint)_offsetDpi, currentDpi);
     }
 
     // ---------- 位图提交 ----------
@@ -705,9 +679,6 @@ public sealed class TaskbarPillWindow : IDisposable
                 case Native.WM_MOUSELEAVE:
                     self.OnMouseLeave();
                     return IntPtr.Zero;
-                case Native.WM_LBUTTONUP:
-                    self.OnLButtonUp();
-                    return IntPtr.Zero;
                 case Native.WM_RBUTTONUP:
                     self.OnRightClick();
                     return IntPtr.Zero;
@@ -725,30 +696,16 @@ public sealed class TaskbarPillWindow : IDisposable
         return Native.DefWindowProcW(hwnd, msg, wParam, lParam);
     }
 
+    /// <summary>左键按下只收提示；拖动已移除（会与搜索框等 XAML 输入层抢 capture，还引入位置记忆的固化问题）。</summary>
     private void OnLButtonDown()
     {
         HideTip();
         _hoverId = null;
         _hoverArmed = false;
-
-        _dragging = true;
-        Native.SetCapture(_hwnd);
-        var p = Native.GetCursorPos();
-        _dragStartCursor = _taskbarHorizontal ? p.X : p.Y;
-        _dragStartX = _lastX;
-        _dragStartY = _lastY;
-        OffsetForCurrentDpi(out uint dpi);
-        _offsetDpi = (int)dpi;
     }
 
     private void OnMouseMove(IntPtr lParam)
     {
-        if (_dragging)
-        {
-            ApplyPosition();
-            return;
-        }
-
         long lp = lParam.ToInt64();
         int x = unchecked((short)(lp & 0xFFFF));
         string? id = HitIdAt(x);
@@ -770,7 +727,7 @@ public sealed class TaskbarPillWindow : IDisposable
     private void OnMouseHover()
     {
         _hoverArmed = false;
-        if (_disposed || _dragging || _hoverId == null) return;
+        if (_disposed || _hoverId == null) return;
         int i = IndexOfHit(_hoverId);
         if (i < 0) return;
         ShowTip(_hits[i]);
@@ -962,23 +919,8 @@ public sealed class TaskbarPillWindow : IDisposable
         _shownTipId = null;
     }
 
-    private void OnLButtonUp()
-    {
-        if (!_dragging) return;
-        _dragging = false;
-        Native.ReleaseCapture();
-
-        // 偏移记在锚点相对量上：锚点被别的工具挤走时，贴片跟着挪，用户拖出的相对位置不丢
-        _offsetPx = _taskbarHorizontal ? _lastX - _lastAnchor : _lastY - _lastAnchor;
-        var s = App.Services.Settings;
-        s.TaskbarBatteryOffsetX = _offsetPx;
-        s.TaskbarBatteryOffsetDpi = _offsetDpi;
-        s.Save();
-    }
-
     private void OnDoubleClick()
     {
-        if (_dragging) OnLButtonUp();
         TrayService.ShowMainWindow();
     }
 

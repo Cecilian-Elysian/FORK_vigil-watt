@@ -66,6 +66,12 @@
     <PackageReference Include="Velopack" Version="1.2.161" />
   </ItemGroup>
 
+  <!-- 任务栏 XAML 占位走 UIA 读（Win11 任务栏 UI 无独立子窗口、GDI 采样全黑，枚举/像素两条路都盲）。
+       UIAutomationClient 不在 UseWinUI 的框架 profile 里，要显式引 WPF profile -->
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.WindowsDesktop.App.WPF" />
+  </ItemGroup>
+
   <!-- 图标文件随输出一起拷贝：运行时 AppWindow.SetIcon 要从 exe 同目录读它 -->
   <ItemGroup>
     <None Update="Assets\VigilWatt.ico" CopyToOutputDirectory="PreserveNewest" />

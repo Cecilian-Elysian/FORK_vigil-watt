@@ -42,8 +42,8 @@ public static class TaskbarLayout
 
     /// <summary>
     /// 贴片左上角（物理像素）。默认位 = 紧贴托盘左边（竖向任务栏则是托盘上边）；该位置被别的
-    /// 任务栏工具占了就退到能放下的最靠右空隙，再叠加用户拖动出来的 <paramref name="offset"/>。
-    /// 偏移相对"实际锚点"记账，锚点被占而移动时用户拖出来的相对位置不丢。
+    /// 任务栏工具占了就退到能放下的最靠右空隙。拖动已移除，<paramref name="offset"/> 恒传 0，
+    /// 参数保留是为了不动落位数学与既有单测。
     /// </summary>
     public static Placement PlaceAvoiding(
         PixelRect taskbar, PixelRect tray, int pillW, int pillH, int offset, int gapPx,
@@ -222,13 +222,6 @@ public static class TaskbarLayout
             return current + 1;
         }
         return current;
-    }
-
-    /// <summary>把记下偏移时的物理像素换算到当前 DPI；Dpi=0 或未变则原样返回（勿逐帧累乘，见 §16.5）。</summary>
-    public static int ScaleOffset(int offsetPx, uint storedDpi, uint currentDpi)
-    {
-        if (storedDpi == 0 || currentDpi == 0 || storedDpi == currentDpi) return offsetPx;
-        return (int)Math.Round(offsetPx * (double)currentDpi / storedDpi);
     }
 
     /// <summary>客户区 X 落在哪一格；分隔缝返回 -1。</summary>

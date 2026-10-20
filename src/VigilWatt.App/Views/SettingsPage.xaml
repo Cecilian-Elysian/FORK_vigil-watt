@@ -267,7 +267,7 @@
                             <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16" Padding="0,12">
                                 <StackPanel Grid.Column="0" Spacing="2" VerticalAlignment="Center">
                                     <TextBlock Text="任务栏电量贴片" Style="{StaticResource RowTitleStyle}" />
-                                    <TextBlock Text="在任务栏里（系统托盘左边）钉一条电量胶囊，按住可沿任务栏拖动；本机电量不参与（系统已有电池图标）"
+                                    <TextBlock Text="在任务栏里（系统托盘左边）钉一条电量胶囊，自动避开搜索框与其他任务栏工具；本机电量不参与（系统已有电池图标）"
                                                Style="{StaticResource RowDescStyle}" />
                                 </StackPanel>
                                 <ToggleSwitch Grid.Column="1" x:Name="TaskbarToggle"

@@ -10,7 +10,6 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Animation;
 using Microsoft.UI.Xaml.Navigation;
-using Windows.Foundation;
 using Windows.UI;
 
 namespace VigilWatt.App.Views;
@@ -301,10 +300,13 @@ public sealed partial class SettingsPage : Page
         if (sender is not Button { Tag: SearchEntry entry }) return;
         SearchResultsBorder.Visibility = Visibility.Collapsed;
         SearchEmptyText.Visibility = Visibility.Collapsed;
-        SettingsContent.UpdateLayout();
-        var y = entry.Target.TransformToVisual(SettingsContent).TransformPoint(new Point(0, 0)).Y;
-        var topMargin = Math.Min(96, SettingsScrollViewer.ViewportHeight * 0.25);
-        SettingsScrollViewer.ChangeView(null, Math.Max(0, SettingsScrollViewer.VerticalOffset + y - topMargin), null, false);
+        // 手工量坐标 + ChangeView 真机仍偏：量与滚之间布局还在变（收面板的重排、高亮加粗），
+        // 动画滚动与重排竞争。BringIntoView 由框架在布局稳定时机定位，0.25 即「顶部留 1/4 视口」。
+        entry.Target.StartBringIntoView(new BringIntoViewOptions
+        {
+            VerticalAlignmentRatio = 0.25,
+            AnimationDesired = true,
+        });
 
         ClearHighlight();
         var accent = Application.Current.Resources.TryGetValue("SystemAccentColor", out var value) && value is Color color
