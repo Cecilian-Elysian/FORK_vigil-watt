@@ -4,7 +4,9 @@ English | [简体中文](README.md)
 
 > A quick view of wireless device batteries on Windows: Bluetooth devices, supported 2.4 GHz peripherals, and an optional system battery in the tray and history.
 
-![Platform](https://img.shields.io/badge/Windows-10%2F11-0078d4) ![.NET](https://img.shields.io/badge/.NET-8-512bd4) ![License](https://img.shields.io/badge/license-MIT-green) [![Release](https://img.shields.io/github/v/release/evren-oct/vigil-watt?label=release&color=blue)](https://github.com/evren-oct/vigil-watt/releases)
+> **Personal fork** of [evren-oct/vigil-watt](https://github.com/evren-oct/vigil-watt) (`Cecilian-Elysian/FORK_vigil-watt`): personal changes only, no releases published here. For stable builds, use the upstream releases.
+
+![Platform](https://img.shields.io/badge/Windows-10%2F11-0078d4) ![.NET](https://img.shields.io/badge/.NET-8-512bd4) ![License](https://img.shields.io/badge/license-MIT-green)
 
 ## Screenshots
 
@@ -41,12 +43,12 @@ Taskbar battery pill:
 
 ## Download and quick start
 
-Download from [GitHub Releases](https://github.com/evren-oct/vigil-watt/releases) or the [Gitee mirror](https://gitee.com/YGWG-LX/vigil-watt/releases):
+This fork **does not publish installers**. For stable builds, download from the upstream [GitHub Releases](https://github.com/evren-oct/vigil-watt/releases) or the [Gitee mirror](https://gitee.com/YGWG-LX/vigil-watt/releases):
 
 - `VigilWattApp-win-Setup.exe`: per-user installer with Velopack auto-updates.
 - `VigilWattApp-win-Portable.zip`: portable build; no installation required.
 
-The packages are self-contained and **do not require a separate .NET runtime installation**. Generated installers in `dist/` are not included in the repository.
+The packages are self-contained and **do not require a separate .NET runtime installation**. Generated installers in `dist/` are not included in the repository. To build personal changes from source, see [docs/dev/build.md](docs/dev/build.md).
 
 1. Launch the app and find the VigilWatt icon in the notification area; it may initially be under the `^` overflow menu.
 2. Left-click the icon to open the main window; right-click for the tray menu.
@@ -120,4 +122,6 @@ Detailed project documentation is primarily in Chinese.
 
 ## Repository and license
 
-[GitHub repository](https://github.com/evren-oct/vigil-watt) · [Gitee mirror](https://gitee.com/YGWG-LX/vigil-watt) · [MIT License](LICENSE) © 2026 evren
+This repository is a personal fork of [evren-oct/vigil-watt](https://github.com/evren-oct/vigil-watt): [Cecilian-Elysian/FORK_vigil-watt](https://github.com/Cecilian-Elysian/FORK_vigil-watt).
+
+Upstream: [GitHub repository](https://github.com/evren-oct/vigil-watt) · [Gitee mirror](https://gitee.com/YGWG-LX/vigil-watt) · [MIT License](LICENSE) © 2026 evren

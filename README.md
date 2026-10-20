@@ -4,7 +4,9 @@
 
 > Windows 无线设备电量一览：蓝牙设备、2.4G 键鼠手柄和可选的本机电池，都能在托盘与历史记录中查看。
 
-![Platform](https://img.shields.io/badge/Windows-10%2F11-0078d4) ![.NET](https://img.shields.io/badge/.NET-8-512bd4) ![License](https://img.shields.io/badge/license-MIT-green) [![Release](https://img.shields.io/github/v/release/evren-oct/vigil-watt?label=release&color=blue)](https://github.com/evren-oct/vigil-watt/releases)
+> **个人 fork**：本仓库改自 [evren-oct/vigil-watt](https://github.com/evren-oct/vigil-watt)（`Cecilian-Elysian/FORK_vigil-watt`），只放自用改动、不发安装包；稳定版以上游 Releases 为准。
+
+![Platform](https://img.shields.io/badge/Windows-10%2F11-0078d4) ![.NET](https://img.shields.io/badge/.NET-8-512bd4) ![License](https://img.shields.io/badge/license-MIT-green)
 
 ## 界面预览
 
@@ -41,12 +43,12 @@
 
 ## 下载与使用
 
-从 [GitHub Releases](https://github.com/evren-oct/vigil-watt/releases) 下载，或使用 [Gitee 镜像](https://gitee.com/YGWG-LX/vigil-watt/releases)：
+本 fork **不发布安装包**。稳定版从上游 [GitHub Releases](https://github.com/evren-oct/vigil-watt/releases) 下载，或使用 [Gitee 镜像](https://gitee.com/YGWG-LX/vigil-watt/releases)：
 
 - `VigilWattApp-win-Setup.exe`：当前用户安装版，包含 Velopack 自动更新。
 - `VigilWattApp-win-Portable.zip`：免安装便携版。
 
-安装包为 self-contained，**无需另外安装 .NET 运行时**。仓库不包含生成的 `dist/` 安装包。
+安装包为 self-contained，**无需另外安装 .NET 运行时**。仓库不包含生成的 `dist/` 安装包。自用改动从源码构建，见 [docs/dev/build.md](docs/dev/build.md)。
 
 1. 启动应用后，在任务栏通知区域找到 VigilWatt 图标；首次可能收在 `^` 溢出区。
 2. 左键打开主窗口，右键打开托盘菜单。
@@ -118,4 +120,6 @@ scripts/                # 构建、打包及临时调试脚本
 
 ## 仓库与许可
 
-[GitHub 主仓库](https://github.com/evren-oct/vigil-watt) · [Gitee 镜像](https://gitee.com/YGWG-LX/vigil-watt) · [MIT License](LICENSE) © 2026 evren
+本仓库是 [evren-oct/vigil-watt](https://github.com/evren-oct/vigil-watt) 的个人 fork：[Cecilian-Elysian/FORK_vigil-watt](https://github.com/Cecilian-Elysian/FORK_vigil-watt)。
+
+上游：[GitHub 主仓库](https://github.com/evren-oct/vigil-watt) · [Gitee 镜像](https://gitee.com/YGWG-LX/vigil-watt) · [MIT License](LICENSE) © 2026 evren
