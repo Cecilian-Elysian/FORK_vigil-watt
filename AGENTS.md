@@ -31,6 +31,7 @@ VigilWatt：Windows 无线设备电量监控（WinUI 3 / .NET 8，个人自用�
 ### 1.1 其它 git 约束
 
 - 本仓库 origin 是**用户个人 fork**：`Cecilian-Elysian/FORK_vigil-watt`（SSH）。上游 `evren-oct/vigil-watt` 与 Gitee 镜像**一律不推**；fork 上也不发 Release，安装包仍以上游 Releases 为准。
+- **上游已加为 remote `upstream`**（`git@github.com:evren-oct/vigil-watt.git`），master 建在 `upstream/main` 真实历史上。取上游更新：`git fetch upstream && git merge upstream/main`（贴片文件大概率冲突：以本 fork 的避让实现为基底，接上游协调层接口，见 `docs/dev/runtime-pitfalls.md` §16.13）。**只 fetch/merge，不推上游。**
 - **未经用户明确确认，不得执行任何 git 写操作**：`commit` / `merge` / `rebase` / `reset` / `checkout` / `branch` / `tag` / `stash` / 改 remote。（用户刚说「撤销提交」则该次 `reset` 算已授权。）
 - **未经用户明确指示，禁止操作远程 GitHub**：推送、删除远程分支或 tag、创建或删除 Release、上传安装包、改仓库设置或权限。`git push`、`gh`、网页、token 都算。
 - 提交和发布只在本机：`git commit` 不推送；`dotnet publish` / `vpk pack` 只写本机 `publish/` 和 `dist/`。

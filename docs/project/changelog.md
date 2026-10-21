@@ -3,6 +3,11 @@
 > 只留「改了什么 + 为什么」。协议、坑、流程在专题文档，这里不抄第二份。
 > 新会话不必读。每条一两句；单日新增超过 15 行就是写长了。发版只在文末版本表加一行。构建结果、打包耗时、文件清单不记（`AGENTS.md` §3）。
 
+## 2026-10-22
+
+- **合并上游 1.2.3（21 个提交）**：master 现在建在 `upstream/main` 真实历史上，贴片避让（本 fork 的核心功能）**保留**——上游同期把贴片改成了"贴托盘 + 拖动"，没有避让能力。冲突 6 处逐一处理：贴片窗口以本 fork 版本为基底、接上游的协调层接口（任务栏句柄由 `TaskbarPillManager` 传入、失效/DPI 变化走回调重建），拖动与偏移设置按用户要求继续移除。
+- **修合并后贴片挂不上任务栏**：`ReleaseWindow` 按旧设计清 `_taskbar`，而 `EnsureWindow` 开头就调它 → 构造时协调层刚传进来的任务栏句柄被自己抹掉，贴片永远挂不上、协调层每秒重建。句柄归协调层所有，不清。协调层 tick 补 try/catch（`DispatcherQueueTimer` 回调里未捕获的异常会直接 fail-fast）。
+
 ## 2026-10-21
 
 - **贴片占位改为"枚举 + UIA"（整带像素采样证伪后的终案）**：真机诊断实测 BitBlt 任务栏区域 100% 纯黑——GDI 采不到 XAML 合成表面，10-20 晚的 `ScanBandContent` 方案不可行，贴片仍叠搜索框。UIA 是系统 XAML UI 唯一"看得见"的路：新增 `TaskbarXamlRects`（后台 250ms 一拍、按类名/AutomationId 模式匹配、宽过任务栏的整条容器丢弃），与窗口枚举合并成占位；`TrayNotifyWnd` 已不是 Win32 子窗口，托盘锚点也从 UIA 拿。csproj 补引 WPF 框架 profile（`UIAutomationClient` 不在 WinUI profile 里）。

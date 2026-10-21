@@ -6,7 +6,9 @@
 
 ## 1. 当前状态
 
-当前安装包 **1.2.3**（`dist/`，本机试装用；尚未上传正式 Release）。正式线上以 GitHub 最新 Release 为准，Gitee 是回退源；更新源 GitHub 优先、8 秒不通回退 Gitee。发新版时保留上一版 `*-full.nupkg` 作为 delta 基准；规则见 `dev/build.md` §8。
+当前源码版本 **1.2.3**（版本号继承上游 1.2.3，已合并上游 + 本 fork 的避让改动）。**已安装的仍是合并前的旧包**（Velopack 装在 `%LOCALAPPDATA%\VigilWattApp`，`1.2.2`+本 fork 提交），合并后的包还没打包安装。发新版时保留上一版 `*-full.nupkg` 作为 delta 基准；规则见 `dev/build.md` §8。
+
+⚠️ **应用内更新的坑**：应用内更新源指向上游，点了会装**上游的包、覆盖本 fork 的避让改动**（数据目录 `%LOCALAPPDATA%\VigilWatt` 不受影响）。想留在 fork 就别点更新提示，或把本 fork 版本号抬到上游之上（如 1.2.4）再重装。
 
 本仓库是 `evren-oct/vigil-watt` 的**个人 fork**（origin = `Cecilian-Elysian/FORK_vigil-watt`，SSH，2026-10-20 起推送）：改动只推 fork，不发 Release、不碰上游；上游 Releases 仍是稳定版来源。
 
@@ -17,6 +19,8 @@
 任务栏贴片是原生子窗口 `Services/TaskbarPillWindow.cs`（`SetParent` 进 `Shell_TrayWnd`），不是 WinUI 覆盖窗；小组件仍用 `TransparentWindowSurface`，Win10 上因此没有 DWM 投影（CR-57）。**拖动走 16ms 轮询，不靠鼠标捕获**——捕获对非前台窗口无效（`dev/runtime-pitfalls.md` §16、§16.5.1；§17 只对小组件）。选屏由 `Services/TaskbarPillManager.cs` 每秒按 `monitorDevicePath` 匹配，配置的屏不在就降级贴主屏，设置页显示真实屏幕名——`\\.\DISPLAYn` 是配置序号不是身份，见 `dev/monitor-identity.md`。
 
 贴片会避让别的任务栏工具：占位 = **窗口枚举（第三方）∪ UIA（系统 XAML UI，`TaskbarXamlRects` 后台 250ms）**——Win11 搜索框/任务按钮是 XAML 渲染、枚举看不见，而 GDI 像素采样对任务栏表面实测全黑（2026-10-21 证伪），UIA 是唯一看得见的路；托盘锚点（`TrayNotifyWnd` 已非 Win32 子窗口）也从 UIA 拿。退到能放下的最靠右空隙，放不下就逐档减显示台数，连 1 台都放不下则整体隐藏。**拖动已按用户要求移除**，位置完全由避让决定。**不收窄任务列表**（两个工具同时收窄会来回跳）。见 `dev/runtime-pitfalls.md` §16.11。
+
+**上游 1.2.3 已合并（2026-10-22）**：master 建在 `upstream/main` 真实历史上，贴片由上游的协调层 `TaskbarPillManager` 按屏幕建实例（任务栏句柄由它传入，失效/DPI 变化走回调重建），避让仍是本 fork 的实现。**贴片不再自己清 `_taskbar`**——句柄归协调层，`ReleaseWindow` 清零会让贴片永远挂不上。见 `dev/runtime-pitfalls.md` §16.13。
 
 页面已缓存（`NavigationCacheMode = Required`），订阅跟 `Loaded`/`Unloaded`。设置页可搜索。日志按日：`logs\app-日期.log`。插件开关即写入授权，没有第二套「写入许可」。
 
