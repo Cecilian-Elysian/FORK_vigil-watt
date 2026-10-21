@@ -14,7 +14,7 @@ VigilWatt：Windows 无线设备电量监控（WinUI 3 / .NET 8，个人自用�
 | 用户说了什么 | 允许做什么 | 禁止做什么 |
 |---|---|---|
 | 「发布」/「打安装包」/「出新版本」 | 本机 `dotnet publish` + `vpk pack`（可改 csproj `<Version>`、changelog 版本表、handoff §1 版本号——**仅当发版必需**） | `git commit`、任何 push / `gh` / 上传 Release |
-| 「提交」/「commit」 | 征得同意后的本机 `git commit` | push；不要顺便 `vpk pack` |
+| 「提交」/「commit」 | 征得同意后的本机 `git commit` | push；不要顺便打包 |
 | 「提交并发布」等**同一条**里写全 | 本机 commit + 本机 pack | 仍禁止远程 |
 | 「推送」/「上传 Release」等**明确**远程词 | 才可动远程 | — |
 
@@ -69,12 +69,13 @@ VigilWatt：Windows 无线设备电量监控（WinUI 3 / .NET 8，个人自用�
 - 测试：`dotnet test src/tests/VigilWatt.Core.Tests`
 - 发布：`dotnet publish src/VigilWatt.App -c Release -p:Platform=x64 -o publish`
   发布前确认没有实例在运行——exe 被占用会导致 `MSB3027` 构建失败。
+- 打安装包：`powershell -ExecutionPolicy Bypass -File scripts\build-installer.ps1`（Velopack，产物在 `dist/`）。
 
 ## 5. 不要碰
 
 - 构建/发布产物：`bin/`、`obj/`、`publish/`、`dist/`（均已 gitignore）。
 - 助手元数据目录：`.workbuddy/`、`.workbuddy-ai/`、`.zcode/`（已 gitignore，**规则写这里等于没写**）。
-- `.vpk-github-token`（**文件名是历史遗留，内容实际是 Gitee 令牌**，已 gitignore，绝不入库）。`publish-github.ps1` 读同名文件当 GitHub 令牌，所以该脚本目前用不了。
+- `.vpk-github-token`（**文件名是历史遗留，内容实际是 Gitee 令牌**，已 gitignore，绝不入库）。`publish-gitee.ps1` 读它当 Gitee 令牌（要先读进 `$env:GITEE_TOKEN`）；`publish-github.ps1` 读同名文件或 `$env:GITHUB_TOKEN`。
 - 仓库根不放临时文件；一次性调试脚本放 `scripts/`，并补 `scripts/README.md` 索引。
 
 ## 6. 静默失败的两个坑（必记）

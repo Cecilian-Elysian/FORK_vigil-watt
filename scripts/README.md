@@ -9,6 +9,7 @@
 | 脚本 | 用途 |
 |---|---|
 | `build-installer.ps1` | 打安装包：`dotnet publish`（Release x64 self-contained）→ 读发布 exe 的 FileVersion 当版本（截 3 段）→ `vpk pack`。产物落 `dist/`（Setup.exe、Portable.zip、`releases.win.json`、`RELEASES`、`*.nupkg`）。发新版**别清 `dist/`**，留着上一版全量包才有 delta；详见 `docs/dev/build.md` §8 |
+| `publish-github.ps1` | 将 `dist/` 全部打包产物发布为 GitHub Release（token 取 `-Token` / `VPK_GITHUB_TOKEN` / 仓库根 `.vpk-github-token`）；详见 `docs/dev/build.md` §8 |
 | `publish-gitee.ps1` | 将 `dist/` 全部打包产物作为当前版本的 Gitee Release 附件发布；需要已推送的 `v<版本>` 标签与 Gitee 写权限令牌（`-Token` 或 `GITEE_TOKEN`，**脚本不读令牌文件**；本机令牌在仓库根 `.vpk-github-token`）。完整发版序列与三个 Gitee 特有坑见 `docs/dev/build.md` §8 |
 | `get-release-notes.ps1` | 发布流水线共用函数：按版本号从 `docs/project/release-notes.md` 截出当前版本段（`Get-ReleaseNotes`），并以 UTF-8 无 BOM 落临时文件（`Write-ReleaseNotesFile`）。`build-installer.ps1` 与 `publish-gitee.ps1` 都 dot-source 它；格式契约见该 md 文件头 |
 | `code-fingerprint.py` | **代码指纹校验器**（纯标准库）：剥掉注释与空白后对代码 token 序列算 sha256，用来**证明"只改了注释、逻辑一行没动"**。`snapshot <out.json>` 记基线 / `verify <in.json>` 比对（`-xaml` 后缀对 `.xaml` 生效，剥 `<!-- -->` 后比空白归一化文本）。做注释精简、批量重排这类"只该动注释"的改动前先 `snapshot`，改完 `verify` 必须输出 `[OK]` |

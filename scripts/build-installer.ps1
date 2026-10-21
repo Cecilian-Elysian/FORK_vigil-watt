@@ -42,6 +42,16 @@ else {
 # 5) Velopack 打包。packId 必须用 VigilWattApp 而不是 VigilWatt：
 #    Velopack 默认装到 %LocalAppData%\<packId>，叫 VigilWatt 会和应用数据目录
 #    %LOCALAPPDATA%\VigilWatt（settings.json/history.db/logs）撞车，升级时数据被清。
+#    vpk 是 dotnet global tool，新开的 PowerShell 会话常常没把 ~/.dotnet\tools 加进 PATH。
+if (-not (Get-Command vpk -ErrorAction SilentlyContinue)) {
+    $vpkExe = Join-Path $env:USERPROFILE ".dotnet\tools\vpk.exe"
+    if (Test-Path $vpkExe) {
+        $env:PATH = "$(Split-Path -Parent $vpkExe);$env:PATH"
+    }
+    else {
+        throw "找不到 vpk。装一个：dotnet tool install -g vpk --version 1.2.161"
+    }
+}
 $dist = Join-Path $root "dist"
 $vpkArgs = @(
     "pack"

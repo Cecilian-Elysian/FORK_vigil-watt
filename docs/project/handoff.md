@@ -99,7 +99,7 @@
 | 轮询 / 采样 | `Devices/DeviceManager.cs`（code-flow.md） |
 | 经典蓝牙 | `Ble/BluetoothClassicWatcher.cs`、`Ble/ClassicDevNodeReader.cs` |
 | 本机电量 | `Power/SystemPowerReader.cs`、`Power/SystemBatteryWatcher.cs`。托盘在 `TrayService.Render` 里跳过 `DeviceSource.System` |
-| 任务栏贴片 | `Services/TaskbarPillWindow.cs`、`TaskbarPillRenderer.cs`、`TaskbarLayout.cs`、`TaskbarOccupancy.cs`。原理 runtime-pitfalls.md §16 |
+| 任务栏贴片 | `Services/TaskbarPillWindow.cs`、`TaskbarPillRenderer.cs`、`TaskbarLayout.cs`、`TaskbarOccupancy.cs`、`TaskbarXamlRects.cs`。原理 runtime-pitfalls.md §16 |
 | 小组件透明 | `Services/TransparentWindowSurface.cs`。贴片不用它。见 §17 |
 | 设备图标 | `Services/DeviceIconFactory.cs`（不要用字体图标） |
 | 程序图标 | `scripts/make-app-icon.py` → `Assets/VigilWatt.ico`；csproj `ApplicationIcon` 和 `MainWindow.ApplyWindowIcon` 都要 |
