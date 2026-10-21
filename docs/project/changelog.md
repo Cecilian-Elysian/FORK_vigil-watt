@@ -10,7 +10,28 @@
 - **节拍收紧削瞬时重叠**：扫描式避让的固有延迟是"占位突变到让位有一拍盲区"，鼠标快速划任务栏时看得见一瞬重叠。主节拍 100→50ms（盲区 ~100ms→~50ms）、UIA 节拍 500→250ms；20Hz 下开销仍 <1% CPU。根治要改 WinEvent 事件驱动，个人应用不值，不做。
 - **内容感知特性整体移除（用户选择"完全不动"）**：贴片跟着酷狗内容变化左右抖——内容感知（贴住控件图标）与光标守卫（鼠标在窗上时躲远）在窗边界乒乓，两个念头轮流做主。删掉内容感知（`TaskbarOccupancy` 采样链路、`TaskbarLayout.RefineByContent` 及其单测、`Native` 的 `GetDC`/`ReleaseDC`/`BitBlt`），占位一律按窗口完整矩形算：悬停切换、控件↔歌词、鼠标怎么划，贴片都不再挪。代价：控件态时贴片与控件之间隔约 80px 空白——稳定性优先，接受这个取舍。
 
+- **MCHOSE K7 V2 Ultra+（`3837:1018`）**：接入 `mouse-k7` 协议——`0x0900` 查询设备信息、被动解析 `0x0600` 电源事件。这颗 dongle 的 feature 通道写通读不通（`GetFeature` 恒 `ERROR_GEN_FAILURE`），原有的 feature 读族与 E2 被动路径一个都不成立，这才是它原先完全读不到电量的根因。帧取自官方 M HUB 运行时 JS 的 `i1e()` / `_K()` / `LA()`，不是猜的。新增 `MchoseK7Codec`（纯函数 + 16 个真机帧向量用例），分类器加 `MouseK7` 并排在 `MouseV2` 之前。见 `hardware/protocols.md` §15。
+- **K7 的 `0xFF` 不能按失败记账**：真机常态应答是 `4D 01 01 01 … 00 FF`（鼠标在睡）。按普通失败记，睡着的鼠标三轮就被判离线并熔断停写、醒了也不再被问，所以 `PollMouseK7` 自己记账——收到任何 `0x4D` 帧就算应答。
+- **新增 CHERRY 插件（PIXIU75 蔚蓝档案 圣园未花联动款）**：64 字节块协议（report `0x04`，块 `0x1A` = 电量 + 充电位），真机 48% 与官方软件一致，插线后 55% 判充电中；有线（`046A:01E2`）与 2.4G（`046A:01E4`）共用同一块通道。见 `hardware/protocols.md` §13。
+- **新增派世 Pulsar 插件（X2 V2 DJMAX 联动款）**：按 Linux `hid-pulsar` 的 17 字节帧（report `0x08`，STATUS/POWER）实现，真机 20% + 3566 mV。见 `hardware/protocols.md` §14。
+- 两个插件都写帧，`PluginEnabled` 默认关；休眠无应答走 `ReportPollFailure` 记账，3 轮转离线并熔断停写，唤醒后最长等 5 分钟退避恢复（与 GANSS 同）。
+- **设备 ID 改为端口无关**：HID 实例段前两段（`7&15dc4901`）由 Windows 按物理端口生成，接收器不报序列号时换 USB 口就变；旧实现哈希整条路径，于是同一个接收器换口后变成一台新设备（历史分裂、黑名单与自定义名失效）。`PluginUtils.StableDeviceKey` 只抹前两段、保留集合序号，`IdFor` 与罗技 `SlotId` 都改走它。代价是同型号两只接收器同时插着会被并成一台（CR-74）。见 `code-flow.md` §2.2。
+- **拔出即时下线，插入不做即时检测**：托盘窗口收 `WM_DEVICECHANGE` 后跑 `RequestReconcileAsync`（只做消失检测，不认领不写帧），约 0.3 秒下线；15 秒节拍用同一个 `ReconcileRemovals` 兜底。**插入方向试过 1 秒接口路径检查 + 30 秒重试阶梯，当天回退**——插入广播实测不可靠、USB 枚举有固有延迟，这段延时是硬件成本，不值得为它叠机制；插入回到原节拍，要立即发现就点主界面「刷新」（`RequestPollAsync` 会认领）。顺带修掉罗技拔掉后不上报离线（`Upsert` 存快照副本，改本地 `IsOnline` 传不到 UI）、刚插上整轮 ping 超时后 5 分钟不再探（丢句柄前必须 `StopListening`，否则监听任务在已关闭句柄上空转、且此后不再重启）。`ReconcileRemovals` 遇到空扫描直接返回——那是 CM 枚举失败，不是"设备全拔了"。见 `code-flow.md` §2.3。
+- **被动监听空转修掉**：句柄失效时 `ReadInput` 立即返回 null，`StartPassiveListen` / `EnsureListening` 的外层 `while` 没有退避 → 实测 7.9 秒刷 22.4 万行、烧满一个核。现在按"连续 3 次在 100ms 内返回 null"判定句柄失效，退避 200ms；正常静音仍等满 500ms，离线确认节拍不受影响。见 BACKLOG CR-75/76（已关闭）。
+
 ## 2026-10-20
+
+- **启动默认显示主界面**：`AppSettings.StartMinimized` 默认值由 `true` 改为 `false`。之前双击后直接缩到托盘，看不到窗口，很容易被当成"没启动起来"。设置页的「启动时最小化」开关仍在，需要托盘常驻的自己打开。注意 `AutostartService` 写注册表时带 `--minimized` 参数，但应用从不读它（只记日志）——所以自启现在也会显示窗口。
+- **开发版数据目录改为 exe 旁边的 `data\`**：`AppPaths.ResolveRootDir()` 用 `#if DEBUG` 分流——Debug 取 `AppContext.BaseDirectory\data`，Release 才取 `%LOCALAPPDATA%\VigilWatt`。这样从 `bin` 双击就能跑，不往用户目录写东西，开发版与正式版的 settings/history/logs 天然隔离。`VIGILWATT_DATA_DIR` 仍可显式覆盖（优先级最高，非法路径自动退回）。`run-app.ps1` 简化为"结束实例 + 启动"，`-Copy` 作为环境受限时的兜底。单实例互斥量仍是全局同名，两边同时只能跑一个（避免抢 HID）。见 `dev/build.md` §3.1。
+- **补上"写盘失败"的盲区 + 新增 `scripts/run-app.ps1`**：`Log` 打开日志失败时会把所有行静默丢弃，用户只看到"一行日志都没有"。新增 `Log.TryProbeWriter`，启动时试开当天日志，失败就弹窗报出路径与真实异常。**根因已验证：从工作区目录启动的 exe 拿不到 `%LOCALAPPDATA%` 写权限**（该目录 ACL 里有沙箱组 `CodexSandboxUsers`），复制到工作区之外即正常；`run-app.ps1` 把这个复制+启动固化成一条命令。定位完成后一次性探针已删除，只留 `TryProbeWriter` / `LastSaveError` / `StartupGuard` 三处。见 `dev/runtime-pitfalls.md` §20。
+- **设置页保存失败不再无声**：`Save_Click` 以前把 `AppSettings.Save()` 的返回值直接丢掉，写盘失败时界面毫无反馈，用户以为"点了没反应"（实测在受限环境下必现）。现在失败会弹原生窗说明路径、真实异常（`AppSettings.LastSaveError`）与常见原因，并直接返回、不再继续应用内存里的改动。
+- **启动失败不再静默**：`OnLaunched` 里的异常以前会直接逸出，被 XAML 包成 stowed exception——事件日志只留一条 `Microsoft.UI.Xaml.dll / 0xc000027b`，应用日志一行写不出来（`Log` 可能还没初始化），用户只看到"点了没反应"。现在启动流程抽成 `StartCore` 由 `try/catch` 包住，失败时 `StartupGuard.Fatal` 落日志 + 原生 `MessageBoxW` 显示异常类型、消息和调用栈，再退出。兜底自身全程 `try/catch`，不允许它自己抛。
+- **设备列表支持删除离线设备**：右键「删除设备…」，确认框默认按钮是取消；删除条目时**一并清掉该设备的历史**并 VACUUM，勾「永久移除」则写本地黑名单，插件认领阶段就不再探测、不发帧。顺序是**名单先落盘再摘条目**——插件那一轮重报会插进空档把条目塞回来。恢复入口在设备页底部「已屏蔽 N 台设备」。见 `code-flow.md` §5.2。
+- **贴片尺寸改为每拍按当前缩放重算**：换线（HDMI → USB-C / 扩展坞）后缩放变了、任务栏像素尺寸却没变时，贴片会一直沿用旧尺寸（重启才恢复）；`GetDpiForWindow` 返回 0 的瞬间还会按 100% 算错。现在高度每拍按 `rect + dpi/96` 重算，高度或缩放任一变就重画。见 `dev/runtime-pitfalls.md` §16.11。
+- **贴片选屏改用显示器身份，修两个 bug**：① 设置页不再显示「主显示器 / 显示器 2」，改为真实名字（`DELL S2719DC · 2560×1440（主显示器）`）；② 切到「仅电脑屏幕」后贴片不再消失——配置的屏不在时降级贴主屏，1 秒内跟到新任务栏。根因是拿 `\\.\DISPLAYn`（当前配置里的序号）当身份与名字，改存 `monitorDevicePath` + 名字快照。见 `dev/monitor-identity.md`。
+- 设置页屏幕行加刷新按钮（页面缓存复用，插拔后不自动重扫）；配置的屏没插时仍列出 `<名字>（未连接）`，保存不会静默改回主屏。
+- **修复任务栏贴片拖动时灵时不灵**：根因是 `SetCapture` 对非前台窗口无效（贴片带 `WS_EX_NOACTIVATE`，光标离开 114×28 的贴片就没有 `WM_MOUSEMOVE`）。拖动改为 16ms 轮询驱动、松手靠 `GetAsyncKeyState` 判定，捕获降级成加速器；顺带修掉"在贴片外松手导致 `_dragging` 卡死、之后悬停就自己跳"的第二个 bug。见 `dev/runtime-pitfalls.md` §16.5.1、BACKLOG CR-73。
+- 单击不再触发设置写盘（偏移没变就不保存）。真机复看清单在 CR-73。
 
 - **贴片压任务栏搜索框（"搜索偏移"的真正元凶）**：用户说的"搜索偏移"一直是任务栏贴片叠在 Win11 搜索框上，此前修的设置页搜索定位是误诊（该修复无害，保留）。根因：搜索框/任务按钮全是 XAML Islands 渲染、宿主整条覆盖不得不进排除表，枚举避让对系统 UI 全盲。先试"候选位像素探测"补丁，按用户"不要用 bug 改 bug"的要求弃掉，落位改制：**横向落位与台数只认整带像素采样**（`ScanBandContent`，逐列判定 + 众数背景），枚举降级为只喂光标守卫，竖放沿用枚举。XAML 盲区（CR-73）随之根治。见 `dev/runtime-pitfalls.md` §16.11。
 - **贴片拖动移除（用户要求）**：拖动会与搜索框等 XAML 输入层抢 capture（卡死、固化大偏移），位置记忆/DPI 换算整套复杂度一并消失；`TaskbarBatteryOffsetX/OffsetDpi`、`ScaleOffset`、capture 兜底全删，`PlaceAvoiding` 的 offset 参数保留恒传 0（不动落位数学与单测）。CR-48 关闭。
@@ -24,6 +45,10 @@
 - **仓库转为个人 fork 并推送远程**：origin 指向 `Cecilian-Elysian/FORK_vigil-watt`（SSH），4 个提交已推送；README 双语加 fork 声明、下载节改指上游 Releases。上游 `evren-oct/vigil-watt` 与 Gitee 镜像不动。
 
 ## 2026-10-19
+
+- **新增寸渊影弑 DARKRIM 与盖世小鸡 GameSir 支持**：杰理 dongle（`3654:6901`）帧格式与 CRC-16/CCITT-FALSE 逐字节确认，电量须发官方同款 `GetBasicInfo(0x09)`（纯被动拿不到），默认关；盖世小鸡状态流由心跳 `0F F2 00` 开启（发一帧约 250 帧/秒、只维持约 2 秒），插件每 60 秒发一帧心跳读 2 秒，不依赖官方软件，默认开。详见 protocols.md §16 / §17。
+
+- **黑爵 / 雷神电量**：接入 AK870 与 ML903 NearLink Se 的已验证接收器查询，品牌开关沿用中英文命名；补充帧解析与迈从接口隔离测试，详见 `hardware/ak870-ml903.md`。
 
 - **HECATE G5M Pro**：接入只读电量插件，认领限定 `35BB:D00B` 的厂商集合；拔出设备时把离线状态交回设备列表。帧样本来自贡献者，本机未复测。见 `hardware/protocols.md` §7。
 - **AULA F99 Pro / DELUX M900 Pro**：接入两个插件。AULA 会写会话帧，默认关，且不进 15 秒发现。DELUX 只读，但与英菲克同 VID/PID，本机没扫到接收器，也默认关。见 `hardware/protocols.md` §8、§9。
@@ -39,6 +64,10 @@
 ## 2026-10-18
 
 - **更新说明**：新增用户向 `docs/project/release-notes.md`，打包时截当前版本段传给 `vpk pack --releaseNotes` 并作为 Gitee Release 正文；发现新版本的确认框显示本次更新内容，关于页新增「更新日志」可离线回看历史版本。格式契约与三处消费方见 `dev/build.md` §8。
+- **前行者 X87 键盘**：新增插件，走官方驱动 `DeviceDriver.exe` 反编译出的 33 字节查询帧（`00 20 01 00 … 校验和`），电量在响应 `body[3]`。真机实测 100%。接口必须在 MI_03（33 字节）而非 MI_04（65 字节）。规格 `hardware/protocols.md` §7.1。
+- **前行者 S9 鼠标**：新增插件，走官方网页驱动 `hub.eweadn.cn` 的贝盈协议，feature report `0x03` 63 字节帧（`[0]=sum([1..62])`），响应 `[6]` bit7=充电、低 7 位=电量。真机实测 72→73%。`0xFF06` 输出通道是死路。规格 §7.2。
+- **键盘发现节拍**：键盘休眠时查询无应答，只探一次会在启动时永久漏掉；`SupportsDiscoveryProbe = true` + `ProbeCooldown = 12s` 参与 15 秒快速发现节拍。
+- **鼠标休眠 0%**：dongle 在鼠标休眠时回结构合法但电量为 0 的满长帧，codec 层直接拒收（真 0% 不存在），不再每轮刷读数过滤器 WARN。
 - **协议与实现来源索引**：新增硬件来源文档，集中记录外部协议依据、参考项目、许可与本机验证边界，并从 docs 首页建立入口。
 - **README 与文档首页整理**：确认 Logitech Bolt 已真机验证、QHW 待对应设备验证，移除易过期的包大小和测试数；根 README 和文档首页改为精简导航，专题索引避免堆叠长表。
 - **剩余时间估算提示原因**：估算不可用时，设备列表和任务栏悬停分别说明当前原因，方便判断是离线、充电、采样不足还是近期未见电量下降。
@@ -151,6 +180,11 @@
 - 新增剩余使用时间估算，按近期放电历史计算并显示于设备列表和任务栏悬停；设置页提供默认开启的全局开关。
 - 放宽剩余时间估算门槛：使用最近 90 天数据，3 个采样点且可测到 1 个百分点净下降即可估算，适配长续航设备。
 
+## 2026-10-20
+
+- 修「点几次保存后进程直接退出」：受限令牌下写 `HKCU\Run` 抛 `UnauthorizedAccessException`，异常从 `Save_Click` 逸出、被全局熔断器累计 5 次后放行退出。`AutostartService` 改为 `TrySetEnabled(out error)` 内部收口，失败只弹「开机自启未生效」，其余设置照常保存。
+- **定案「没托盘 / 贴片跑到原点 / 保存失败」的真因**：工作区目录带 `Low` 完整性标签，构建出的 exe 继承它，进程以 Low IL 运行，写不了 Medium 的用户目录与 HKCU、也发不了 shell 消息。csproj 构建后自动 `icacls /setintegritylevel Medium`，`run-app.ps1` 再兜一次；启动日志新增 `进程身份`（含 `完整性=`）一行。见 `dev/runtime-pitfalls.md` §20。
+
 ## 版本
 
 发新版留着上一版全量包才有 delta；清空 `dist/` 再打同版本就没有。见 `dev/build.md` §8。**1.0.11 是首个上传 Gitee Release 的版本**（1.0.10 及以前只在本地 `dist/`，故 1.0.11 的 delta 是拿本地留存的 1.0.10 全量包做基准算出来的）。
@@ -172,4 +206,5 @@
 | 1.0.2 | 10-16 | 更新进度高水位（多文件不倒退）；本机试装，非正式发版 |
 | 1.2.0 | 10-16 | 关于页（介绍 + 检查更新从设置迁出）；本机打包 |
 | 1.2.1 | 10-18 | 剩余时间估算及原因提示、设备右键重命名简介；本机打包 |
+| 1.2.3 | 10-21 | 9 款社区设备适配；删除离线设备与永久屏蔽、贴片拖动/选屏/尺寸三处修复、失败不再静默；本机试装 |
 | 1.2.2 | 10-19 | 8 款社区设备适配（会写帧的默认关）、更新说明与贡献者页；本机试装 |

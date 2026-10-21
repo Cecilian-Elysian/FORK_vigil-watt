@@ -63,6 +63,9 @@
 | D8 | 充电状态映射抽成 `ChargingStateMap` |
 | D9 | 删除罗技 `StableHash` 直通 |
 | D10 | 作废。独立写入许可被「插件开关即授权」取代 |
+| CR-75 | 拔出后 HID++ 通知空转：`BatteryPluginBase.StartPassiveListen` 与 `LogitechPlugin.EnsureListening` 按"连续 3 次读取在 100ms 内返回 null"判定句柄失效，退避 200ms。正常静音仍等满 500ms，节拍不受影响 |
+| CR-76 | 与 CR-75 同一修法落地。Inphic/Hecate/Delux 的读窗口 `continue` 有 deadline 兜住（不无限循环），未改 |
+| CR-77 | `MarkOffline` 注释改为"插件内软离线的唯一落地点"，并注明拔出走 `ReconcileRemovals`（不该盖 `LastUpdated`）。行为本来就对，是注释过满 |
 
 ## wontfix
 
@@ -75,3 +78,4 @@
 | CR-44 | 在旧 WinUI 贴片上 `WS_EX_LAYERED` 测过无效。原生贴片后来用的是另一条合成路径，不要把这条结论套过去 |
 | CR-51 | 日志按用户要求一天一个文件，大小靠保留天数限制 |
 | CR-64 | 反复打开主窗口抬高的是工作集，不是泄漏。判泄漏只看私有提交。见 `memory-growth-2026-10-12.md` |
+| CR-78 | 原判断有误：`RunExclusiveAsync` 已 catch `WaitAsync` 的 `ObjectDisposedException` 并 return，`Release` 也有 catch。剩下的 `Detach` 与在跑 `Poll` 并发由插件内 try/catch 兜住，退出时不影响用户 |

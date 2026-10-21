@@ -18,7 +18,7 @@ public sealed class AppServices : IDisposable
     public DeviceManager Manager { get; }
     public TrayService Tray { get; private set; } = null!;
     public WidgetWindow? Widget { get; set; }
-    public TaskbarPillWindow? TaskbarBattery { get; set; }
+    public TaskbarPillManager? TaskbarBattery { get; set; }
     public MainWindow? MainWindow { get; set; }
 
     public AppServices()
@@ -154,12 +154,41 @@ public partial class App : Application
             return;
         }
 
+        // 启动兜底：任何一步抛异常都会让进程静默死亡（XAML 包成 stowed exception，
+        // 事件日志只留 Microsoft.UI.Xaml.dll / 0xc000027b，应用日志一行没有），
+        // 用户只看到"点了没反应"。这里把真实异常落到日志并弹窗，再退出。
+        try
+        {
+            StartCore(args);
+        }
+        catch (Exception ex)
+        {
+            StartupGuard.Fatal("初始化服务与窗口", ex);
+            ShutdownLogging();
+            Environment.Exit(1);
+        }
+    }
+
+    /// <summary>真正的启动流程。由 <see cref="OnLaunched"/> 的兜底包住，本身不做异常处理。</summary>
+    private void StartCore(LaunchActivatedEventArgs args)
+    {
+        // 日志写不进去时 Emit 会静默丢弃所有行，用户那边看到的就是"一行日志都没有"，
+        // 进而没法判断到底卡在哪。先探一次，不行就明说，别让人对着一个哑巴应用猜。
+        if (!Log.TryProbeWriter(out var logError))
+        {
+            StartupGuard.Warn("VigilWatt 日志不可写",
+                $"无法写入日志文件：\r\n{logError}\r\n\r\n" +
+                "应用会继续运行，但日志、设置和历史记录都可能无法保存。\r\n" +
+                "常见原因：数据目录权限被改、磁盘已满、或被安全软件拦截。");
+        }
+
         Services = new AppServices();
         // 日志级别与按日保留天数：启动时应用（重启生效，不追求热更新）
         Log.MinLevel = LogLevelNames.Parse(Services.Settings.LogLevel);
         Log.RetentionDays = Services.Settings.LogRetentionDays;
 
         Log.Info($"启动 VigilWatt，参数: {args.Arguments}");
+        Log.Info("进程身份: " + ProcessIdentity.Describe());
         Services.Manager.Start();
 
         Services.MainWindow = new MainWindow();
@@ -181,7 +210,7 @@ public partial class App : Application
 
         if (Services.Settings.TaskbarBatteryEnabled)
         {
-            Services.TaskbarBattery = new TaskbarPillWindow();
+            Services.TaskbarBattery = new TaskbarPillManager();
         }
 
         _ = CheckForStartupUpdateAsync();

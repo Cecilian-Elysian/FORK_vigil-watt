@@ -58,7 +58,10 @@ VigilWatt：Windows 无线设备电量监控（WinUI 3 / .NET 8，个人自用�
 - 硬件写入类改动：先读 `docs/hardware/safety.md`（零写入原则、写入闸门；各插件开关现状见其 §3.1）。
 - 改读数过滤器 / 帧解析 / 历史库后，**必须重跑单测**。
 - 动代码前对照 `docs/dev/review-standard.md` 的 R 清单；**审查发现的未修项在 `docs/reviews/BACKLOG.md`**（唯一载体）。
-- **收进社区贡献后补两处，各管一段，不重复**：根目录 `CONTRIBUTORS.md` 按人加一行（用户向，只写"谁做了什么"、关联 PR）；`docs/project/contributions.md` 记这个 PR 收了什么、**没**收到什么、是否本机复测。
+- **收进社区贡献：署名先带进来，再补两处记录。**
+  - **署名三处都要保留**：① git 作者——用 `git merge --no-ff` 保留原提交，不改 author、不 squash；必须 `cherry-pick` 或按文件摘取子集时，用 `--author`，并把原 PR 号写进提交信息。② `src/` 文件头的「时间 + 用户名」保持贡献者本人（格式见 `docs/dev/comment-style.md` §7）；接手大改另起一行注明维护者，**不覆盖**原署名。③ 文档两处见下。
+  - `CONTRIBUTORS.md` 按人加一行（用户向，只写"谁做了什么"、关联 PR）；贡献者自己写的行若留了「待合并」这类占位，合并时换成 PR 链接。
+  - `docs/project/contributions.md` 记这个 PR 收了什么、**没**收到什么、是否本机复测。
 
 ## 4. 构建与测试
 
@@ -66,6 +69,12 @@ VigilWatt：Windows 无线设备电量监控（WinUI 3 / .NET 8，个人自用�
 - 构建：`dotnet build VigilWatt.sln -c Debug`
 - 运行：从 `src\VigilWatt.App\bin\x64\Debug\net8.0-windows10.0.19041.0\win-x64\` 启动。
   必须用 **sln** 构建（产物在 `bin\x64\...`），直接构建 csproj 的产物在 `bin\...`，不要混用。
+- **Debug 构建的数据目录在 `bin\x64\...\win-x64\data\`**（`AppPaths` 用 `#if DEBUG` 分流，Release 才用
+  `%LOCALAPPDATA%\VigilWatt`），所以直接从 `bin` 双击就能跑，不碰用户目录、也不与正式版抢配置。
+- **exe 必须保持 Medium 完整性级别**：工作区目录带 `Low` 标签，重建的 exe 会继承它，进程变 Low IL 后
+  写不进 `%LOCALAPPDATA%`/`HKCU\Run`、`Shell_NotifyIcon` 失败（没托盘、贴片跑到原点）。csproj 的
+  `RestoreExeIntegrityLevel` 已在 Debug 构建后自动 `icacls /setintegritylevel Medium`；手工验证用
+  `icacls <exe> | findstr Mandatory`。见 `docs/dev/runtime-pitfalls.md` §20。
 - 测试：`dotnet test src/tests/VigilWatt.Core.Tests`
 - 发布：`dotnet publish src/VigilWatt.App -c Release -p:Platform=x64 -o publish`
   发布前确认没有实例在运行——exe 被占用会导致 `MSB3027` 构建失败。
@@ -75,7 +84,9 @@ VigilWatt：Windows 无线设备电量监控（WinUI 3 / .NET 8，个人自用�
 
 - 构建/发布产物：`bin/`、`obj/`、`publish/`、`dist/`（均已 gitignore）。
 - 助手元数据目录：`.workbuddy/`、`.workbuddy-ai/`、`.zcode/`（已 gitignore，**规则写这里等于没写**）。
-- `.vpk-github-token`（**文件名是历史遗留，内容实际是 Gitee 令牌**，已 gitignore，绝不入库）。`publish-gitee.ps1` 读它当 Gitee 令牌（要先读进 `$env:GITEE_TOKEN`）；`publish-github.ps1` 读同名文件或 `$env:GITHUB_TOKEN`。
+- `.vpk-gitee-token`（Gitee 发布令牌，已 gitignore，绝不入库）。`publish-gitee.ps1` **自己不读文件**，
+  由人工读进 `$env:GITEE_TOKEN` 再跑，见 `docs/dev/build.md` §8。GitHub 侧只做更新源读取，
+  没有发布脚本（`publish-github.ps1` 已删，发版只走 Gitee）。
 - 仓库根不放临时文件；一次性调试脚本放 `scripts/`，并补 `scripts/README.md` 索引。
 
 ## 6. 静默失败的两个坑（必记）

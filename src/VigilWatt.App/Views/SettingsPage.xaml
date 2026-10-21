@@ -298,6 +298,36 @@
                                 <ComboBox Grid.Column="1" x:Name="TaskbarMaxCombo" Width="180"
                                           VerticalAlignment="Center" />
                             </Grid>
+                            <Border Style="{StaticResource RowDividerStyle}" />
+                            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16" Padding="0,12">
+                                <StackPanel Grid.Column="0" Spacing="2" VerticalAlignment="Center">
+                                    <TextBlock Text="显示屏幕" Style="{StaticResource RowTitleStyle}" />
+                                    <TextBlock Text="贴片钉在哪块显示器的任务栏上；那块屏不在时临时贴主屏" Style="{StaticResource RowDescStyle}" />
+                                </StackPanel>
+                                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8"
+                                            VerticalAlignment="Center">
+                                    <ComboBox x:Name="TaskbarScreenCombo" Width="280" VerticalAlignment="Center" />
+                                    <!-- 插拔显示器后设置页不会自动重扫（页面被缓存复用），给一个手动重扫入口 -->
+                                    <Button x:Name="TaskbarScreenRefreshBtn" Click="TaskbarScreenRefresh_Click"
+                                            Width="36" Height="32" Padding="0"
+                                            ToolTipService.ToolTip="重新扫描显示器"
+                                            AutomationProperties.Name="重新扫描显示器">
+                                        <FontIcon FontSize="14" Glyph="&#xE72C;" />
+                                    </Button>
+                                </StackPanel>
+                            </Grid>
+                            <Border Style="{StaticResource RowDividerStyle}" />
+                            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16" Padding="0,12">
+                                <StackPanel Grid.Column="0" Spacing="2" VerticalAlignment="Center">
+                                    <TextBlock Text="重置贴片位置" Style="{StaticResource RowTitleStyle}" />
+                                    <TextBlock Text="将贴片恢复为默认位置（紧贴系统托盘左侧）"
+                                               Style="{StaticResource RowDescStyle}" />
+                                </StackPanel>
+                                <Button Grid.Column="1" x:Name="TaskbarResetBtn"
+                                        Content="重置" Width="80"
+                                        VerticalAlignment="Center"
+                                        Click="TaskbarReset_Click" />
+                            </Grid>
                         </StackPanel>
                     </Border>
                 </StackPanel>

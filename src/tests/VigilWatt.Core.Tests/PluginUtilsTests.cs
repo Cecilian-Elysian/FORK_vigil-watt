@@ -46,6 +46,49 @@ public class PluginUtilsTests
         // 设备路径由系统给出，大小写固定；这里只锁"实现不会自作主张归一化"
         Assert.NotEqual(PluginUtils.StableHash("HID#A"), PluginUtils.StableHash("hid#a"));
     }
+
+    // 本机实测的三个端口实例（Bolt C548 的 HID++ 长接口）：换口后 ID 漂移，列表里多出一台同名设备
+    private const string Guid = "#{4d1e55b2-f16f-11cf-88cb-001111000030}";
+    private const string PortA = @"\\?\HID#VID_046D&PID_C548&MI_02&Col02#7&15dc4901&0&0001" + Guid;
+    private const string PortB = @"\\?\HID#VID_046D&PID_C548&MI_02&Col02#7&393736c6&0&0001" + Guid;
+    private const string PortC = @"\\?\HID#VID_046D&PID_C548&MI_02&Col02#7&8918bd5&0&0001" + Guid;
+
+    [Fact]
+    public void P6_同一接口换USB口_端口无关键相同()
+    {
+        // 前提：整条路径确实随端口变（这正是旧实现的 bug）
+        Assert.NotEqual(PluginUtils.StableHash(PortA), PluginUtils.StableHash(PortB));
+
+        Assert.Equal(PluginUtils.StableDeviceKey(PortA), PluginUtils.StableDeviceKey(PortB));
+        Assert.Equal(PluginUtils.StableDeviceKey(PortA), PluginUtils.StableDeviceKey(PortC));
+        Assert.Equal("18AADF9F12EA1A68", PluginUtils.StableDeviceHash(PortB));
+    }
+
+    [Fact]
+    public void P7_同一接收器的不同集合_仍是不同设备()
+    {
+        // 集合序号（0&0000 / 0&0001）稳定且必须保留，否则同一个接收器的键盘和鼠标会被并成一台
+        var col01 = @"\\?\HID#VID_046D&PID_C548&MI_02&Col01#7&15dc4901&0&0000" + Guid;
+        var col02 = @"\\?\HID#VID_046D&PID_C548&MI_02&Col02#7&15dc4901&0&0001" + Guid;
+        Assert.NotEqual(PluginUtils.StableDeviceHash(col01), PluginUtils.StableDeviceHash(col02));
+        Assert.Contains("#0&0000", PluginUtils.StableDeviceKey(col01));
+    }
+
+    [Fact]
+    public void P8_不同型号仍是不同设备()
+    {
+        var other = @"\\?\HID#VID_24AE&PID_1412&MI_02&Col02#7&15dc4901&0&0001" + Guid;
+        Assert.NotEqual(PluginUtils.StableDeviceHash(PortA), PluginUtils.StableDeviceHash(other));
+    }
+
+    [Fact]
+    public void P9_路径格式不认识_原样返回不抛异常()
+    {
+        // 退回旧行为（哈希整条路径）也比抛异常好：认不出的路径至少还能用
+        Assert.Equal(@"\\?\hid#a", PluginUtils.StableDeviceKey(@"\\?\hid#a"));
+        Assert.Equal(@"\\?\HID#X#7&a#{}", PluginUtils.StableDeviceKey(@"\\?\HID#X#7&a#{}"));
+        Assert.Equal("", PluginUtils.StableDeviceKey(""));
+    }
 }
 
 /// <summary>接口认领注册表：同一接口同一时刻只能归一个插件（抢句柄/抢会话的防线）。</summary>

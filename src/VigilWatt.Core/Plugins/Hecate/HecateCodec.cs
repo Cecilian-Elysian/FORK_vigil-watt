@@ -15,7 +15,7 @@ internal readonly record struct HecateStatus(
 /// <summary>
 /// 功 能： 解析 HECATE report 0x04 电量状态帧。
 /// 2026/10/19 14:55:00 xliu
-/// 帧布局见 docs/hardware/protocols.md §7。0x01 在此品牌表示充电，与英菲克相反。
+/// 帧布局见 docs/hardware/hecate.md §1。0x01 在此品牌表示充电，与英菲克相反。
 /// </summary>
 internal static class HecateCodec
 {

@@ -39,6 +39,10 @@ public interface IBatteryPlugin
     /// <summary>轮询一轮电量，返回本次有更新的设备状态。</summary>
     IReadOnlyList<DeviceStatus> Poll();
 
+    /// <summary>只做"消失检测"：把已不在扫描结果里的设备拆掉并标离线，**不探测、不写帧**。
+    /// 拔出广播与 15 秒发现节拍都调它；插入不在这里认领（见 code-flow.md §2.3）。</summary>
+    IReadOnlyList<DeviceStatus> ReconcileRemovals(IReadOnlyList<HidDeviceInfo> availableDevices);
+
     /// <summary>插件在轮询之外主动推送的状态更新（如罗技 HID++ 电量/充电自发通知）；不推送可永不触发，DeviceManager 订阅后走与 Poll 相同的 Upsert。</summary>
     event Action<DeviceStatus>? StatusPushed;
 

@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using VigilWatt.Core.Devices;
 using VigilWatt.Core.Models;
 using VigilWatt.Core.Utils;
 using Windows.Devices.Bluetooth;
@@ -68,6 +69,14 @@ public sealed class BluetoothClassicWatcher : IDisposable
     private void HandleDevice(
         string id, IReadOnlyDictionary<string, object> props, string? name, bool connectionVerified = false)
     {
+        // 永久移除的设备：不再跟踪、不再读设备节点（否则每次 Updated 都会白查一轮注册表）
+        if (DeviceBlocklist.IsBlocked($"btc:{id}"))
+        {
+            if (_devices.TryRemove(id, out var blocked))
+                Log.Info($"经典蓝牙设备已永久移除，停止跟踪: {blocked.DisplayName}");
+            return;
+        }
+
         // Updated 事件只带变化的属性：IsConnected 缺失时沿用现状，不能当成断开
         bool? connected = WatcherProps.ReadConnected(props);
 

@@ -8,9 +8,9 @@
 
 | 脚本 | 用途 |
 |---|---|
+| `run-app.ps1` | **运行 Debug 版**：结束运行中实例（不然锁 DLL）→ 把 exe 的完整性级别提回 Medium（工作区目录带 `Low` 标签，重建的 exe 会继承它，导致没托盘/贴片跑到原点/写不进注册表）→ 从 `bin\x64\Debug\...\win-x64` 启动。Debug 的数据目录就在该目录下的 `data\`（`AppPaths` 用 `#if DEBUG` 分流），所以默认不用复制、不碰 `%LOCALAPPDATA%`。`-Copy` 是兜底：复制到工作区之外（默认 `C:\VigilWattRun`）并用 `VIGILWATT_DATA_DIR` 指过去。判据见 `docs/dev/runtime-pitfalls.md` §20，用法见 `docs/dev/build.md` §3.1 |
 | `build-installer.ps1` | 打安装包：`dotnet publish`（Release x64 self-contained）→ 读发布 exe 的 FileVersion 当版本（截 3 段）→ `vpk pack`。产物落 `dist/`（Setup.exe、Portable.zip、`releases.win.json`、`RELEASES`、`*.nupkg`）。发新版**别清 `dist/`**，留着上一版全量包才有 delta；详见 `docs/dev/build.md` §8 |
-| `publish-github.ps1` | 将 `dist/` 全部打包产物发布为 GitHub Release（token 取 `-Token` / `VPK_GITHUB_TOKEN` / 仓库根 `.vpk-github-token`）；详见 `docs/dev/build.md` §8 |
-| `publish-gitee.ps1` | 将 `dist/` 全部打包产物作为当前版本的 Gitee Release 附件发布；需要已推送的 `v<版本>` 标签与 Gitee 写权限令牌（`-Token` 或 `GITEE_TOKEN`，**脚本不读令牌文件**；本机令牌在仓库根 `.vpk-github-token`）。完整发版序列与三个 Gitee 特有坑见 `docs/dev/build.md` §8 |
+| `publish-gitee.ps1` | 将 `dist/` 全部打包产物作为当前版本的 Gitee Release 附件发布；需要已推送的 `v<版本>` 标签与 Gitee 写权限令牌（`-Token` 或 `GITEE_TOKEN`，**脚本不读令牌文件**；本机令牌在仓库根 `.vpk-gitee-token`，需人工读进环境变量）。完整发版序列与三个 Gitee 特有坑见 `docs/dev/build.md` §8 |
 | `get-release-notes.ps1` | 发布流水线共用函数：按版本号从 `docs/project/release-notes.md` 截出当前版本段（`Get-ReleaseNotes`），并以 UTF-8 无 BOM 落临时文件（`Write-ReleaseNotesFile`）。`build-installer.ps1` 与 `publish-gitee.ps1` 都 dot-source 它；格式契约见该 md 文件头 |
 | `code-fingerprint.py` | **代码指纹校验器**（纯标准库）：剥掉注释与空白后对代码 token 序列算 sha256，用来**证明"只改了注释、逻辑一行没动"**。`snapshot <out.json>` 记基线 / `verify <in.json>` 比对（`-xaml` 后缀对 `.xaml` 生效，剥 `<!-- -->` 后比空白归一化文本）。做注释精简、批量重排这类"只该动注释"的改动前先 `snapshot`，改完 `verify` 必须输出 `[OK]` |
 | `make-app-icon.py` | **程序图标生成器**（纯标准库，无需 Pillow）：解析式绘制绿色圆角方块 + 白色闪电，超采样抗锯齿，输出 `src/VigilWatt.App/Assets/VigilWatt.ico`（16~256 共 9 档）。`--preview x.png` 出一张放大预览图便于肉眼比对。**改图标配色/字形改这个脚本后重跑即可，不要手改 .ico** |
@@ -20,6 +20,8 @@
 | `probe-classic-kind.py` | **经典蓝牙设备类型信号探针**（纯 ctypes + SetupAPI）：枚举 `BTHENUM\*` 节点，打印服务 UUID（实例 ID 前缀）、`DEVPKEY_DeviceDisplay_Category`（如 `Input.Mouse`）与 ClassGuid。用来回答"这台经典蓝牙设备到底是耳机还是鼠标"，`--all` dump 全属性 |
 | `test-rapou7.ps1` | 雷柏 dongle（VID_24AE）HID P/Invoke 直测。也是 build.md §7"PowerShell 5.1" 的范例：本机 Add-Type 不支持字符串插值/内联 out/可空注解，要用老式语法 |
 | `probe-hid-caps.py` | **HID 接口能力探针**（纯 ctypes，只读）：`HidP_GetCaps` + `HidP_GetButtonCaps` 打出 UsagePage、IN/OUT/FEATURE 报告长度与逐条 button caps。回答"这个接口到底有没有主机→设备通道"——`OUT=0 / FEATURE=0` 即物理上无法主动查询（弱水时砂 dongle 的判据）。用法 `python probe-hid-caps.py 38FF`（参数为设备路径里的大小写无关片段，可省） |
+| `probe-bolt-battery.py` | **罗技 Bolt 电量探针**（`pip install hidapi`）：在 `046D:C548` 的 `0xFF00/0x02` 长接口上发 HID++ 请求，优先 `0x1004` Unified Battery、回退 `0x1000` Battery Status，打印百分比与充电状态。用来核对插件读数是否与官方 HUB 一致 |
+| `probe-bolt-ping.py` | **罗技 Bolt 连通性探针**：同一接口发 `Root.Ping`，只看有没有回应——用来区分"设备没连、被别的进程占了会话、还是协议读错" |
 | `test-rose-dongle-interactive.py` | ROSE dongle（38FF:0001）交互式被动监听 5 分钟，零写入——耳机按键操作会经 dongle 出现在这里，可当"耳机已连接"探针 |
 | `test-rose-dongle-passive.py` | ROSE dongle MI_03（consumer）被动监听 60 秒，零写入 |
 | `test-rose-dongle-endpoint.py` | ROSE dongle 接口 3 **绕过 HID 栈直读物理端点**（pyusb/libusb），只读不写。前提是 MI_03 已用 Zadig 换成 WinUSB——HID 驱动下 libusb 打不开设备，且 HID 栈只按描述符的 3 字节取包，端点上的长帧会被它丢掉。`--info` 打印配置/接口/端点，默认监听 0x82 300 秒 |

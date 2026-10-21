@@ -33,7 +33,7 @@
     <ScrollViewer Padding="20,16">
         <StackPanel Spacing="0" MaxWidth="640" HorizontalAlignment="Left">
 
-            <TextBlock Text="无线外设电量"
+            <TextBlock Text="无线设备电量监控"
                        FontSize="12"
                        Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
             <TextBlock Text="VigilWatt" FontSize="32" FontWeight="SemiBold"

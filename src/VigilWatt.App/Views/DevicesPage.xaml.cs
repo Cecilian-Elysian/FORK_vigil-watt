@@ -1,4 +1,5 @@
 using VigilWatt.App.ViewModels;
+using VigilWatt.Core.Devices;
 using VigilWatt.Core.Models;
 using VigilWatt.Core.Utils;
 using Microsoft.UI.Xaml;
@@ -87,6 +88,11 @@ public sealed partial class DevicesPage : Page
         bool empty = devices.Count == 0;
         DeviceList.Visibility = empty ? Visibility.Collapsed : Visibility.Visible;
         EmptyState.Visibility = empty ? Visibility.Visible : Visibility.Collapsed;
+
+        // 永久移除的设备不在列表里，恢复入口只有这一行，所以它必须跟着名单实时变
+        int blocked = App.Services.Manager.BlockedDevices.Count;
+        BlockedBar.Visibility = blocked > 0 ? Visibility.Visible : Visibility.Collapsed;
+        BlockedText.Text = $"已屏蔽 {blocked} 台设备 · 管理";
     }
 
     private async void CustomizeDevice_Click(object sender, RoutedEventArgs e)
@@ -293,15 +299,215 @@ public sealed partial class DevicesPage : Page
         if (device == null || device.Source == DeviceSource.System) return;
 
         var menu = new MenuFlyout();
-        menu.Items.Add(new MenuFlyoutItem
+        var customize = new MenuFlyoutItem
         {
             Text = "自定义名称和图标",
             Tag = model.Id,
-        });
-        var item = (MenuFlyoutItem)menu.Items[0];
-        item.Click += CustomizeDevice_Click;
+        };
+        customize.Click += CustomizeDevice_Click;
+        menu.Items.Add(customize);
+        menu.Items.Add(new MenuFlyoutSeparator());
+
+        // 在线设备不给删：删了插件下一轮又报回来，等于什么都没做
+        var delete = new MenuFlyoutItem
+        {
+            Text = model.IsOnline ? "删除设备（离线后可删）" : "删除设备…",
+            Tag = model.Id,
+            IsEnabled = !model.IsOnline,
+        };
+        delete.Click += DeleteDevice_Click;
+        menu.Items.Add(delete);
+
         menu.ShowAt(row, new FlyoutShowOptions { Position = e.GetPosition(row) });
         e.Handled = true;
+    }
+
+    private async void DeleteDevice_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not MenuFlyoutItem item || item.Tag is not string id) return;
+        var device = App.Services.Manager.Find(id);
+        if (device == null || device.Source == DeviceSource.System || device.IsOnline) return;
+
+        // 条数要写进确认框：只说"无法恢复"用户没概念，写出多少条才知道代价
+        var summary = await Task.Run(() => App.Services.History.GetDeviceSummary(id));
+        string historyLine = summary.Count == 0
+            ? "该设备没有历史记录。"
+            : $"将同时删除 {summary.Count:N0} 条历史记录（{summary.First:MM-dd} ~ {summary.Last:MM-dd}），无法恢复。";
+
+        var permanent = new CheckBox
+        {
+            Content = new TextBlock
+            {
+                Text = "永久移除此设备（加入黑名单，以后不再扫描；需要恢复时到本页底部「已屏蔽设备」解除）",
+                TextWrapping = TextWrapping.Wrap,
+                MaxWidth = 320,
+            },
+            Margin = new Thickness(0, 8, 0, 0),
+        };
+        var secondary = Application.Current.Resources["TextFillColorSecondaryBrush"] as Brush;
+        var critical = Application.Current.Resources["SystemFillColorCriticalBrush"] as Brush;
+        var body = new StackPanel { Spacing = 6, MinWidth = 380 };
+        body.Children.Add(new TextBlock
+        {
+            Text = $"来源：{DeviceSourceInfo.ShortLabel(device.Source)} · 最后更新 {device.LastUpdated:MM-dd HH:mm}",
+            FontSize = 12,
+            Foreground = secondary,
+        });
+        // 危险动作靠文字点出来：WinUI 没有内置的"危险按钮"样式，App 级引用 generic.xaml 的 DefaultButtonStyle
+        // 会让 App.xaml 解析失败（启动即崩），所以按钮保持系统默认，代价写在这一行里
+        body.Children.Add(new TextBlock
+        {
+            Text = historyLine,
+            FontSize = 12,
+            TextWrapping = TextWrapping.Wrap,
+            Foreground = summary.Count > 0 ? critical : secondary,
+        });
+        body.Children.Add(new TextBlock
+        {
+            Text = "设备重新连接后会自动回到列表。",
+            FontSize = 12,
+            Foreground = secondary,
+        });
+        body.Children.Add(permanent);
+
+        var dialog = new ContentDialog
+        {
+            XamlRoot = XamlRoot,
+            Title = $"删除「{device.DisplayName}」？",
+            Content = body,
+            PrimaryButtonText = "删除",
+            CloseButtonText = "取消",
+            DefaultButton = ContentDialogButton.Close,   // 回车不误删
+        };
+        if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
+
+        var result = App.Services.Manager.RemoveOfflineDevice(id, permanent.IsChecked == true);
+        if (result != DeviceRemoveResult.Removed)
+        {
+            await ShowMessageAsync("无法删除", result switch
+            {
+                DeviceRemoveResult.Online => "设备已经上线，未删除。",
+                DeviceRemoveResult.NotFound => "设备已不在列表中。",
+                DeviceRemoveResult.SystemDevice => "本机电量不能删除。",
+                _ => "设置写入失败，未删除。",
+            });
+            Refresh();
+            return;
+        }
+
+        // 删除 + VACUUM 都是全表级操作，放线程池；失败要让人看见，不能静默（R5）
+        try
+        {
+            int deleted = await Task.Run(() =>
+            {
+                int n = App.Services.History.DeleteDevices(new[] { id });
+                App.Services.History.Compact();   // DELETE 只标空闲页，不 VACUUM 文件不会缩小
+                return n;
+            });
+            Log.Info($"删除设备 {device.DisplayName}：清理历史 {deleted} 条");
+        }
+        catch (Exception ex)
+        {
+            Log.Error("删除设备历史失败", ex);
+            await ShowMessageAsync("历史未删净", $"设备已从列表移除，但历史删除失败：{ex.Message}");
+        }
+
+        Refresh();
+    }
+
+    private async void ManageBlocked_Click(object sender, RoutedEventArgs e)
+    {
+        var panel = new StackPanel { Spacing = 10 };
+        // 失败提示只能写在框里：ContentDialog 同一 XamlRoot 同时只允许开一个，这里再弹一个会直接抛
+        var status = new TextBlock
+        {
+            FontSize = 12,
+            TextWrapping = TextWrapping.Wrap,
+            Visibility = Visibility.Collapsed,
+            Foreground = Application.Current.Resources["SystemFillColorCriticalBrush"] as Brush,
+        };
+        var root = new StackPanel { Spacing = 8, MinWidth = 380, Children = { panel, status } };
+        var dialog = new ContentDialog
+        {
+            XamlRoot = XamlRoot,
+            Title = "已屏蔽的设备",
+            Content = root,
+            CloseButtonText = "关闭",
+        };
+
+        void Rebuild()
+        {
+            panel.Children.Clear();
+            var items = App.Services.Manager.BlockedDevices;
+            if (items.Count == 0)
+            {
+                panel.Children.Add(new TextBlock { Text = "没有已屏蔽的设备。" });
+                return;
+            }
+
+            var tertiary = Application.Current.Resources["TextFillColorTertiaryBrush"] as Brush;
+            foreach (var (id, info) in items)
+            {
+                var row = new Grid { ColumnSpacing = 12 };
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+                var text = new StackPanel { Spacing = 2 };
+                text.Children.Add(new TextBlock
+                {
+                    Text = string.IsNullOrWhiteSpace(info.Name) ? id : info.Name,
+                    FontSize = 14,
+                    TextTrimming = TextTrimming.CharacterEllipsis,
+                });
+                text.Children.Add(new TextBlock
+                {
+                    Text = $"屏蔽于 {info.BlockedAt:yyyy-MM-dd HH:mm}",
+                    FontSize = 11,
+                    Foreground = tertiary,
+                });
+                row.Children.Add(text);
+
+                var unblock = new HyperlinkButton
+                {
+                    Content = "解除",
+                    Tag = id,
+                    VerticalAlignment = VerticalAlignment.Center,
+                };
+                unblock.Click += (s, _) =>
+                {
+                    if (s is not HyperlinkButton button || button.Tag is not string target) return;
+                    if (!App.Services.Manager.UnblockDevice(target))
+                    {
+                        status.Text = "解除失败：设置写入失败，未解除屏蔽。";
+                        status.Visibility = Visibility.Visible;
+                        return;
+                    }
+                    status.Visibility = Visibility.Collapsed;
+                    Rebuild();
+                    Refresh();
+                };
+                Grid.SetColumn(unblock, 1);
+                row.Children.Add(unblock);
+
+                panel.Children.Add(row);
+            }
+        }
+
+        Rebuild();
+        await dialog.ShowAsync();
+        Refresh();
+    }
+
+    private async Task ShowMessageAsync(string title, string message)
+    {
+        var dialog = new ContentDialog
+        {
+            XamlRoot = XamlRoot,
+            Title = title,
+            Content = new TextBlock { Text = message, TextWrapping = TextWrapping.Wrap },
+            CloseButtonText = "知道了",
+        };
+        await dialog.ShowAsync();
     }
 
     private static (string Text, int SelectionStart, int SelectionLength) FilterDeviceNameInput(

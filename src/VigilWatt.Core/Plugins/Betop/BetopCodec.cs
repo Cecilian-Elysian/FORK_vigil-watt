@@ -3,7 +3,7 @@ namespace VigilWatt.Core.Plugins.Betop;
 /// <summary>
 /// 功 能： 北通 (BETOP) 手柄状态报告的纯帧编解码——不碰句柄、不写日志，便于单测。
 /// 2026/10/06 15:53:36 xliu
-/// 帧结构、T9 被动流、占位帧判定与实测依据见 docs/hardware/protocols.md §4。
+/// 帧结构、T9 被动流、占位帧判定与实测依据见 docs/hardware/betop.md §1。
 /// </summary>
 internal static class BetopCodec
 {
@@ -46,7 +46,7 @@ internal static class BetopCodec
 
     /// <summary>
     /// dongle 在"手柄未连接（关机/休眠/未配对）"时上报的占位值（raw 80）——不是电量。
-    /// 开机态永远是 0x58，故只认 0x50 是零风险判据。详见 protocols.md §4.4.1。
+    /// 开机态永远是 0x58，故只认 0x50 是零风险判据。详见 betop.md §1.4.1。
     /// </summary>
     public const byte T9NotLinkedRaw = 0x50;
 

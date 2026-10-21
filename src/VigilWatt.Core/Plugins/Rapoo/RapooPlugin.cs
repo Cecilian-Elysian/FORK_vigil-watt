@@ -7,7 +7,7 @@ namespace VigilWatt.Core.Plugins.Rapoo;
 /// <summary>
 /// 功 能： 雷柏 (Rapoo) 2.4G 插件 —— 纯被动实现，不向设备写任何字节。
 /// 2026/10/06 15:53:36 xliu
-/// 帧布局、充电标志编码与离线两条腿见 <see cref="RapooCodec"/> 及 docs/hardware/protocols.md §3。
+/// 帧布局、充电标志编码与离线两条腿见 <see cref="RapooCodec"/> 及 docs/hardware/rapoo.md §1。
 /// </summary>
 public sealed class RapooPlugin : BatteryPluginBase
 {

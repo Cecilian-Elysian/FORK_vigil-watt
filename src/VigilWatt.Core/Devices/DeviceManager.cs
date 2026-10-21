@@ -10,6 +10,18 @@ using VigilWatt.Core.Utils;
 
 namespace VigilWatt.Core.Devices;
 
+/// <summary>删除离线设备的结果（UI 按它决定提示文案）。</summary>
+public enum DeviceRemoveResult
+{
+    Removed,
+    NotFound,
+    /// <summary>确认框开着时设备上线了：不能删，否则等于把在线设备藏起来。</summary>
+    Online,
+    SystemDevice,
+    /// <summary>名单写不进 settings.json：状态一个都没动。</summary>
+    SaveFailed,
+}
+
 /// <summary>
 /// 功 能： 统一设备管理（中枢）：合并 BLE + 经典蓝牙 + 2.4G 插件状态，写历史、发变更事件；插件反射自动发现，接口认领经 DeviceClaimRegistry 防抢。
 /// 2026/10/06 15:53:36 xliu
@@ -30,8 +42,9 @@ public sealed class DeviceManager : IDisposable
     /// <summary>每台设备"是否已就低电量提醒过"。电量回到阈值之上（或充电）就复位，下次跌破再提醒一次；
     /// 设备条目被移除时也一并清掉（见 <see cref="ExpireTombstones"/> / <see cref="DropDevicesOf"/>，CR-23）。</summary>
     private readonly ConcurrentDictionary<string, bool> _lowBatteryNotified = new();
-    /// <summary>由历史记录补出的离线占位条目（见 <see cref="RestoreOfflineTombstones"/>）；过期剔除时只能删这些，不能误删"在位但读不到"的真实设备。</summary>
-    private readonly HashSet<string> _tombstoneIds = new();
+    /// <summary>由历史记录补出的离线占位条目（见 <see cref="RestoreOfflineTombstones"/>）；过期剔除时只能删这些，不能误删"在位但读不到"的真实设备。
+    /// 用并发字典是因为删除设备在 UI 线程也会摘它，与轮询线程的增删并发。</summary>
+    private readonly ConcurrentDictionary<string, byte> _tombstoneIds = new();
     private System.Threading.Timer? _pollTimer;
     private System.Threading.Timer? _sampleTimer;
     private System.Threading.Timer? _discoveryTimer;
@@ -41,6 +54,7 @@ public sealed class DeviceManager : IDisposable
     private readonly SemaphoreSlim _passGate = new(1, 1);
     private Task _currentPoll = Task.CompletedTask;
     private Task _currentDiscovery = Task.CompletedTask;
+    private Task _currentReconcile = Task.CompletedTask;
 
     /// <summary>单台设备状态有更新（含低电量提醒触发）。</summary>
     public event Action<DeviceStatus>? DeviceUpdated;
@@ -148,6 +162,9 @@ public sealed class DeviceManager : IDisposable
             {
                 if (stat.Last < cutoff) continue;
                 if (_devices.ContainsKey(stat.DeviceId)) continue;
+                // 用户删掉/屏蔽的设备不要再从历史补回来（历史通常已随删除清掉，这里是纵深防御）
+                if (_settings.BlockedDevices.ContainsKey(stat.DeviceId)) continue;
+                if (_settings.DismissedDevices.ContainsKey(stat.DeviceId)) continue;
 
                 // 用户主动关掉的品牌插件，不要靠历史记录把它"复活"成离线条目——
                 // 那会让"关了开关却还显示"的老问题换个形式回来。
@@ -176,7 +193,7 @@ public sealed class DeviceManager : IDisposable
                     LastUpdated = stat.Last,
                     IsOnline = false,
                 });
-                _tombstoneIds.Add(stat.DeviceId);
+                _tombstoneIds.TryAdd(stat.DeviceId, 0);
                 added++;
             }
             if (added > 0)
@@ -196,7 +213,7 @@ public sealed class DeviceManager : IDisposable
         if (_tombstoneIds.Count == 0) return;
         var cutoff = DateTimeOffset.Now - TombstoneWindow;
         var expired = new List<string>();
-        foreach (var id in _tombstoneIds)
+        foreach (var id in _tombstoneIds.Keys)
         {
             if (_devices.TryGetValue(id, out var d) && (d.IsOnline || d.LastUpdated > cutoff)) continue;
             expired.Add(id);
@@ -204,12 +221,7 @@ public sealed class DeviceManager : IDisposable
         if (expired.Count == 0) return;
 
         foreach (var id in expired)
-        {
-            _devices.TryRemove(id, out _);
-            _remainingTimeEstimates.TryRemove(id, out _);
-            _tombstoneIds.Remove(id);
-            _lowBatteryNotified.TryRemove(id, out _);
-        }
+            DropEntry(id);
         Log.Info($"离线占位已过期移除 {expired.Count} 台");
         DevicesChanged?.Invoke();
     }
@@ -260,7 +272,7 @@ public sealed class DeviceManager : IDisposable
         if (_devices.TryRemove(SystemBatteryWatcher.DeviceId, out _))
         {
             _remainingTimeEstimates.TryRemove(SystemBatteryWatcher.DeviceId, out _);
-            _tombstoneIds.Remove(SystemBatteryWatcher.DeviceId);
+            _tombstoneIds.TryRemove(SystemBatteryWatcher.DeviceId, out _);
             _lowBatteryNotified.TryRemove(SystemBatteryWatcher.DeviceId, out _);
             Log.Info("已关闭本机电量监控，移除系统电量条目");
             DevicesChanged?.Invoke();
@@ -292,6 +304,57 @@ public sealed class DeviceManager : IDisposable
             _currentDiscovery = RunExclusiveAsync(DiscoverOnlyAsync);
             return _currentDiscovery;
         }
+    }
+
+    /// <summary>
+    /// 插拔事件：对所有启用插件做一遍"消失检测"（零写入），拔出的设备立即下线。
+    /// **只拆不认领**——插入交给 15 秒/60 秒节拍或主界面手动刷新（<see cref="RequestPollAsync"/> 会 Attach）。见 code-flow.md §2.3。
+    /// </summary>
+    public Task RequestReconcileAsync()
+    {
+        lock (_pollSync)
+        {
+            if (!_currentPoll.IsCompleted) return _currentPoll;   // 完整轮询本来就会拆
+            if (!_currentReconcile.IsCompleted) return _currentReconcile;
+            _currentReconcile = RunExclusiveAsync(ReconcileOnceAsync);
+            return _currentReconcile;
+        }
+    }
+
+    private Task ReconcileOnceAsync()
+    {
+        try
+        {
+            ReconcileAllEnabled(HidDeviceScanner.Scan());
+        }
+        catch (Exception ex)
+        {
+            Log.Error("插拔移除检测异常", ex);
+        }
+        return Task.CompletedTask;
+    }
+
+    /// <summary>对所有启用的插件跑一遍"消失检测"（零写入），返回是否有设备被拆。</summary>
+    private bool ReconcileAllEnabled(IReadOnlyList<HidDeviceInfo> hidDevices)
+    {
+        bool changed = false;
+        foreach (var plugin in _plugins)
+        {
+            if (!IsPluginEnabled(plugin)) continue;
+            try
+            {
+                foreach (var d in plugin.ReconcileRemovals(hidDevices))
+                {
+                    Upsert(d);
+                    changed = true;
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"插件 {plugin.Name} 移除检测失败", ex);
+            }
+        }
+        return changed;
     }
 
     /// <summary>把一段 pass 放到线程池并**串行**执行（闸门保证同一时刻只有一段 pass 在动插件）；用 Task.Run 因调用方可能是 UI 线程而 HID 探测是阻塞 I/O。</summary>
@@ -344,14 +407,82 @@ public sealed class DeviceManager : IDisposable
         if (dropped.Count == 0) return;
 
         foreach (var id in dropped)
-        {
-            _devices.TryRemove(id, out _);
-            _remainingTimeEstimates.TryRemove(id, out _);
-            _tombstoneIds.Remove(id);
-            _lowBatteryNotified.TryRemove(id, out _);
-        }
+            DropEntry(id);
         Log.Info($"插件 {pluginName} 已禁用，移除其 {dropped.Count} 台设备");
         DevicesChanged?.Invoke();
+    }
+
+    /// <summary>把一台设备从内存各表里摘干净。不碰插件、不碰历史：设备物理上还在，插件要继续盯着它何时恢复。</summary>
+    private void DropEntry(string id)
+    {
+        _devices.TryRemove(id, out _);
+        _remainingTimeEstimates.TryRemove(id, out _);
+        _tombstoneIds.TryRemove(id, out _);
+        _lowBatteryNotified.TryRemove(id, out _);
+    }
+
+    /// <summary>已屏蔽设备快照（「已屏蔽设备」列表用），按屏蔽时间倒序。</summary>
+    public IReadOnlyList<(string Id, BlockedDevice Info)> BlockedDevices => _settings.BlockedDevices
+        .OrderByDescending(kv => kv.Value.BlockedAt)
+        .Select(kv => (kv.Key, kv.Value))
+        .ToList();
+
+    /// <summary>
+    /// 删除一台离线设备：**名单先落盘再摘条目**，反过来会被插件那一轮重报插进空档；历史由调用方删（要 Task.Run）。
+    /// <paramref name="block"/> = 永久移除（写黑名单，以后不再扫描）。见 docs/project/code-flow.md §5.2。
+    /// </summary>
+    public DeviceRemoveResult RemoveOfflineDevice(string id, bool block)
+    {
+        if (!_devices.TryGetValue(id, out var device)) return DeviceRemoveResult.NotFound;
+        if (device.Source == DeviceSource.System) return DeviceRemoveResult.SystemDevice;
+        if (device.IsOnline) return DeviceRemoveResult.Online;
+
+        bool hadDismiss = _settings.DismissedDevices.TryGetValue(id, out long priorDismiss);
+        _settings.BlockedDevices.TryGetValue(id, out var priorBlock);
+
+        if (block)
+        {
+            _settings.BlockedDevices[id] = new BlockedDevice { Name = device.DisplayName, BlockedAt = DateTimeOffset.Now };
+            _settings.DismissedDevices.TryRemove(id, out _);   // 黑名单优先，留着删除标记只会在解除屏蔽后继续挡
+        }
+        else
+        {
+            _settings.DismissedDevices[id] = DateTimeOffset.Now.ToUnixTimeMilliseconds();
+        }
+
+        if (!_settings.Save())
+        {
+            // 名单没落盘就不能动状态：否则重启后设备回来，用户以为删掉了
+            if (priorBlock == null) _settings.BlockedDevices.TryRemove(id, out _);
+            else _settings.BlockedDevices[id] = priorBlock;
+            if (hadDismiss) _settings.DismissedDevices[id] = priorDismiss;
+            else _settings.DismissedDevices.TryRemove(id, out _);
+            Log.Error($"删除设备失败：settings.json 写入失败 {device.DisplayName}");
+            return DeviceRemoveResult.SaveFailed;
+        }
+
+        DropEntry(id);
+        DevicesChanged?.Invoke();
+        Log.Info(block
+            ? $"已永久移除设备: {device.DisplayName} ({id})"
+            : $"已删除离线设备: {device.DisplayName} ({id})");
+        return DeviceRemoveResult.Removed;
+    }
+
+    /// <summary>解除屏蔽；设备在位时立刻排一轮轮询，让它尽快回到列表。</summary>
+    public bool UnblockDevice(string id)
+    {
+        if (!_settings.BlockedDevices.TryRemove(id, out var removed)) return false;
+        _settings.DismissedDevices.TryRemove(id, out _);
+        if (!_settings.Save())
+        {
+            _settings.BlockedDevices[id] = removed;
+            Log.Error($"解除屏蔽失败：settings.json 写入失败 {id}");
+            return false;
+        }
+        Log.Info($"已解除屏蔽: {removed.Name} ({id})");
+        _ = RequestPollAsync();
+        return true;
     }
 
     /// <summary>只认领、不读电量（见 RequestDiscoveryAsync）。各插件慢探测并行，Upsert 仍在本线程。</summary>
@@ -360,6 +491,11 @@ public sealed class DeviceManager : IDisposable
         try
         {
             var hidDevices = HidDeviceScanner.Scan();
+
+            // 先对所有启用的插件做"消失检测"（零写入）。不进 15 秒节拍的插件（罗技/北通/AULA/GANSS）
+            // 本来要等 60 秒主轮询才拆会话，拔掉后条目一直显示在线。
+            ReconcileAllEnabled(hidDevices);
+
             var tasks = new List<Task<IReadOnlyList<DeviceStatus>>>();
             foreach (var plugin in _plugins)
             {
@@ -495,6 +631,16 @@ public sealed class DeviceManager : IDisposable
 
     private void Upsert(DeviceStatus incoming)
     {
+        // 删除过的设备每轮都会被插件重新上报（接口还在位），黑名单与删除标记在这里一刀切。
+        if (DeviceRemoval.ShouldDrop(_settings.BlockedDevices, _settings.DismissedDevices, incoming.Id, incoming.IsOnline))
+            return;
+        if (DeviceRemoval.ShouldClearDismissal(_settings.DismissedDevices, incoming.Id, incoming.IsOnline))
+        {
+            _settings.DismissedDevices.TryRemove(incoming.Id, out _);
+            _settings.Save();
+            Log.Info($"设备重新上线，已解除删除标记: {incoming.DisplayName}");
+        }
+
         // 数据源（插件/watcher）会复用并原地改写同一个 DeviceStatus 实例。直接把它存进 _devices，
         // 后续再比较就变成"同一对象和自己比"，changed 恒为假（历史即写 / DeviceUpdated / 骤降保护全失效）。
         // 所以先快照 incoming 当"新值"，库里存的始终是独立副本当"旧值"——详见 docs/project/architecture.md §6。
@@ -517,7 +663,7 @@ public sealed class DeviceManager : IDisposable
         DeviceStatusMerger.Apply(status, snapshot);
 
         // 占位条目一旦被真实来源接管（重新上线），就不再按占位规则过期剔除
-        if (status.IsOnline) _tombstoneIds.Remove(status.Id);
+        if (status.IsOnline) _tombstoneIds.TryRemove(status.Id, out _);
 
         if (changed)
         {

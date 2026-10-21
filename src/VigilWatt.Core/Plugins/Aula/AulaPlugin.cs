@@ -8,7 +8,7 @@ namespace VigilWatt.Core.Plugins.Aula;
 /// <summary>
 /// 功 能： AULA F99 Pro 2.4G 键盘插件，复用迈从 0x13 会话后读推送。
 /// 2026/10/19 15:10:00 xliu
-/// 只发已见到的会话帧，不发无应答的 4A，也不进 15 秒发现。见 docs/hardware/protocols.md §9。
+/// 只发已见到的会话帧，不发无应答的 4A，也不进 15 秒发现。见 docs/hardware/aula.md §1。
 /// </summary>
 public sealed class AulaPlugin : BatteryPluginBase
 {

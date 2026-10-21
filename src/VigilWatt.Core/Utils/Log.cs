@@ -182,6 +182,31 @@ public static class Log
         }
     }
 
+    /// <summary>
+    /// 启动自检：试开当天的日志文件，失败时把**真实原因**交出来。
+    /// <see cref="Emit"/> 会把写入失败全部吞掉（这是对的，日志不能反过来搞挂应用），
+    /// 代价是用户那边只看到"一行日志都没有"，无从判断是没启动还是写不进去。启动时探一次即可区分。
+    /// </summary>
+    public static bool TryProbeWriter(out string error)
+    {
+        lock (Gate)
+        {
+            error = "";
+            try
+            {
+                Directory.CreateDirectory(_logDir);
+                var path = Path.Combine(_logDir, FileNameFor(DateTime.Now.Date));
+                using var probe = new FileStream(path, FileMode.Append, FileAccess.Write, FileShare.ReadWrite);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                error = $"{_logDir}{Environment.NewLine}{ex.GetType().Name}: {ex.Message}";
+                return false;
+            }
+        }
+    }
+
     private static void Write(LogLevel level, string tag, string message)
     {
         if (level < MinLevel) return;

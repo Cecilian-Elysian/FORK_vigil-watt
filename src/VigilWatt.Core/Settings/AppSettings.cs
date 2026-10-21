@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -23,6 +24,7 @@ public class AppSettings
     /// <summary>历史保留天数，过期清理。</summary>
     public int HistoryRetentionDays { get; set; } = 90;
 
+    /// <summary>开机自启。**默认关闭**，且这里只是保存时的快照——真正生效的是 HKCU Run 键（`AutostartService`），改这个字段不会开关自启。</summary>
     public bool Autostart { get; set; }
 
     public bool WidgetEnabled { get; set; }
@@ -46,7 +48,14 @@ public class AppSettings
     /// <summary>任务栏贴片最多显示几台设备，超出显示 "+N"。合法范围见 <c>VigilWatt.App.Services.TaskbarBatteryOptions</c>（1~5，默认 3）。</summary>
     public int TaskbarBatteryMaxDevices { get; set; } = 3;
 
-    public bool StartMinimized { get; set; } = true;
+    /// <summary>贴片显示在哪个屏幕（空 = 自动）：":primary:" = 主显示器；否则是显示器的稳定设备路径，见 docs/dev/monitor-identity.md。</summary>
+    public string TaskbarBatteryScreen { get; set; } = "";
+
+    /// <summary>上条所选屏幕的名字（如 "DELL S2719DC"），只用于强提示用户，不做匹配；匹配靠设备路径。</summary>
+    public string TaskbarBatteryScreenLabel { get; set; } = "";
+
+    /// <summary>启动时是否最小化到托盘（不显示主窗口）。**默认 false**：显示主窗口，贴片才在用户看得见的地方亮出来。</summary>
+    public bool StartMinimized { get; set; } = false;
 
     /// <summary>窗口背景材质。取值见 <c>VigilWatt.App.Services.WindowBackdrop</c>：Auto（跟随系统能力）/ Mica（云母，仅 Win11，不满足自动降级）/ Acrylic（磨砂，Win10 1809+）/ Solid（纯色分层底）；未知取值按 Auto。</summary>
     public string WindowBackdrop { get; set; } = "Auto";
@@ -59,12 +68,19 @@ public class AppSettings
         ["Mchose"] = false,   // 迈从 dongle 协议未破解，探测写入可能干扰设备
         ["Rapoo"] = true,     // 雷柏走纯被动心跳读取，零写入，默认开启
         ["Betop"] = true,     // 北通手柄：发官方同款只读状态查询（cmd=0x5），默认开启
+        ["Ajazz"] = false,
+        ["Thunderobot"] = false,
         ["Inphic"] = true,    // 英菲克 report 0x03 被动监听，不发送任何帧
-        ["Hecate"] = true,    // HECATE/漫步者电竞：厂商集合 0xFF1C/0x0092 被动状态帧，零写入（见 docs/hardware/protocols.md §7）
+        ["Darkrim"] = false,  // 寸渊影弑：发官方同款 GetBasicInfo(0x09) 才拿得到电量，会写帧，默认关（§16）
+        ["GameSir"] = true,   // 盖世小鸡：每轮发一帧官方心跳开启状态流，60 秒突发读一次，默认开（§17）
+        ["Hecate"] = true,    // HECATE/漫步者电竞：厂商集合 0xFF1C/0x0092 被动状态帧，零写入（见 docs/hardware/hecate.md §1）
         ["Delux"] = false,    // 与英菲克同为 1D57:FA65，只读 0x000A；本机尚未扫到该接收器，默认关
         ["Aula"] = false,     // 狼蛛 F99 Pro：要写 0x13 会话帧才能读电量，默认关闭
         ["DualSense"] = true, // 索尼手柄蓝牙 HID 只读，不发送报告（见 docs/hardware/dualsense.md）
         ["Ganss"] = false,   // GANSS GS3104T-Pro：发固定查询帧才能读电量（会写），默认关闭
+        ["Cherry"] = false,   // CHERRY PIXIU75：64 字节块通道读块 0x1A，要写帧，默认关闭
+        ["Pulsar"] = false,   // 派世 X2 V2：17 字节 STATUS/POWER 查询，要写帧，默认关闭
+        ["Eweadn"] = false,   // 前行者 X87 键盘 / S9 鼠标：两套协议都要发查询帧，默认关闭（eweadn.md §1）
     };
 
     /// <summary>是否把本机（笔记本）电池也纳入监控。默认关闭——它是"另一类设备"，不像外设那样需要盯着，用户明确要时才开（见设置页「监控本机电量」）。
@@ -72,6 +88,15 @@ public class AppSettings
     public bool MonitorSystemBattery { get; set; } = false;
 
     public Dictionary<string, DeviceCustomization> DeviceCustomizations { get; set; } = new();
+
+    /// <summary>用户"永久移除"的设备（黑名单）：Id → 名称与时间。命中则不认领、不探测、不进列表，只能手动解除。
+    /// 与 <see cref="DismissedDevices"/> 是两回事：那个是临时的，设备一上线就失效。
+    /// 用并发字典是因为删除发生在 UI 线程、查询发生在插件轮询线程，普通 Dictionary 边读边写会抛。</summary>
+    public ConcurrentDictionary<string, BlockedDevice> BlockedDevices { get; set; } = new();
+
+    /// <summary>删除过条目的设备：Id → 删除时刻（Unix ms）。插件每轮会重新上报仍在位的离线条目，
+    /// 靠它挡住；设备重新上线时自动清除（用户删的是"离线条目"，设备回来了就该显示）。</summary>
+    public ConcurrentDictionary<string, long> DismissedDevices { get; set; } = new();
 
     /// <summary>日志级别。取值见 <see cref="VigilWatt.Core.Utils.LogLevelNames"/>（Off/Debug/Info/Warn/Error），默认 Info；未知取值按 Info。**重启生效**（启动时赋给 Log.MinLevel）。</summary>
     public string LogLevel { get; set; } = VigilWatt.Core.Utils.LogLevelNames.Default;
@@ -90,6 +115,9 @@ public class AppSettings
 
     /// <summary>进程内缓存：Load 只读一次磁盘（旧版每次 Load 都读文件，插件每轮轮询都会命中）。</summary>
     private static readonly object CacheGate = new();
+
+    /// <summary>Save 的串行闸：轮询线程与 UI 线程可能同时写同一份 .tmp。</summary>
+    private static readonly object SaveGate = new();
     private static AppSettings? _cached;
 
     public static AppSettings Load()
@@ -111,6 +139,8 @@ public class AppSettings
 
             _cached = loaded ?? new AppSettings();
             _cached.DeviceCustomizations ??= new Dictionary<string, DeviceCustomization>();
+            _cached.BlockedDevices ??= new ConcurrentDictionary<string, BlockedDevice>();
+            _cached.DismissedDevices ??= new ConcurrentDictionary<string, long>();
 
             // 老 settings.json 缺新插件的开关键时补默认值：反序列化会用 JSON 里的字典**整体替换**默认字典，
             // 缺键的插件会被 DeviceManager/设置页的 TryGetValue 判成"关闭"，新增插件（如 Betop）装上去默认不工作、用户还以为是功能没实现。
@@ -138,27 +168,40 @@ public class AppSettings
     /// 原子写：先写同目录临时文件并**刷盘**，再整体 rename 覆盖（CR-20）。
     /// 旧实现直接 <c>File.WriteAllText</c> 覆盖原文件，进程写一半崩溃/断电会留下截断的 JSON，
     /// 下次 <see cref="Load"/> 反序列化失败就**静默回落默认值**——用户全部设置丢失且无任何提示。
-    /// 同卷 rename 在 NTFS 上是原子替换，读端只会看到"旧的完整文件"或"新的完整文件"。
+    /// 同卷 rename 在 NTFS 上是原子替换；返回是否真的落盘（删除设备要"先写名单再动状态"，写失败必须能回滚）。
     /// </summary>
-    public void Save()
+    public bool Save()
     {
-        var tmp = SettingsPath + ".tmp";
-        try
+        // 删除设备会在轮询线程上"上线即解除标记"顺带 Save，与 UI 线程撞同一份 .tmp 会互相踩掉
+        lock (SaveGate)
         {
-            Directory.CreateDirectory(Path.GetDirectoryName(SettingsPath)!);
-            var bytes = new UTF8Encoding(false).GetBytes(JsonSerializer.Serialize(this, JsonOpts));
-            using (var fs = new FileStream(tmp, FileMode.Create, FileAccess.Write, FileShare.None))
+            var tmp = SettingsPath + ".tmp";
+            LastSaveError = "";
+            try
             {
-                fs.Write(bytes, 0, bytes.Length);
-                fs.Flush(flushToDisk: true);
+                Directory.CreateDirectory(Path.GetDirectoryName(SettingsPath)!);
+                var bytes = new UTF8Encoding(false).GetBytes(JsonSerializer.Serialize(this, JsonOpts));
+                using (var fs = new FileStream(tmp, FileMode.Create, FileAccess.Write, FileShare.None))
+                {
+                    fs.Write(bytes, 0, bytes.Length);
+                    fs.Flush(flushToDisk: true);
+                }
+                File.Move(tmp, SettingsPath, overwrite: true);
+                lock (CacheGate) _cached = this;
+                return true;
             }
-            File.Move(tmp, SettingsPath, overwrite: true);
-            lock (CacheGate) _cached = this;
-        }
-        catch (Exception ex)
-        {
-            Log.Error("settings.json 保存失败", ex);
-            try { if (File.Exists(tmp)) File.Delete(tmp); } catch { /* 清不掉临时文件不致命，忽略 */ }
+            catch (Exception ex)
+            {
+                // 日志本身可能就写不进去（同一目录），所以把原因同时留在属性里给 UI 弹窗用
+                LastSaveError = $"{ex.GetType().Name}: {ex.Message}";
+                Log.Error("settings.json 保存失败", ex);
+                try { if (File.Exists(tmp)) File.Delete(tmp); } catch { /* 清不掉临时文件不致命，忽略 */ }
+                return false;
+            }
         }
     }
+
+    /// <summary>最近一次 <see cref="Save"/> 失败的原因（空串 = 没失败过）。
+    /// 存在的理由：失败原因要能显示给用户——只写进日志时，日志本身写不进去就彻底失明了。</summary>
+    public static string LastSaveError { get; private set; } = "";
 }

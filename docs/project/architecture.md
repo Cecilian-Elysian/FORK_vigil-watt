@@ -91,12 +91,13 @@ DeviceManager.Upsert() 是唯一的状态汇聚点（BLE 和插件都汇到它�
 | **历史写入双通道** | 定时采样（SampleIntervalMinutes，无变化也写点）+ 电量变化立即写（Upsert 里），保证曲线既平滑又不漏跳变 |
 | **删除历史后立即 VACUUM** | SQLite 的 `DELETE` 只把页标成空闲、**不缩小文件**；不 VACUUM 的话用户删完看到文件大小没变，会以为删除没生效。删除是低频操作，VACUUM 的整库重写开销可接受 |
 | **HistoryStore 支持注入库路径** | `HistoryStore(dbPath)` 可选参数让单测指向临时库，使删除/统计逻辑能进纯 net8.0 测试项目跑真 SQLite（不碰真实 history.db） |
-| **统一 DeviceStatus.Id** | BLE=蓝牙地址、2.4G=设备路径哈希（`mchose:{StableHash}`）。改协议后设备 ID 会变（旧曲线对不上新 ID）——历史库里同时存在 `mchose:D78E…`（错误时代）和 `mchose:0F60…`（现在）即此原因 |
+| **统一 DeviceStatus.Id** | BLE=蓝牙地址、2.4G=**端口无关键**哈希（`mchose:{StableHash(StableDeviceKey)}`，换 USB 口不变，见 `code-flow.md` §2.2）。改协议或改身份规则后设备 ID 会变（旧曲线对不上新 ID）——历史库里同时存在 `mchose:D78E…`（错误时代）和 `mchose:0F60…`（现在）即此原因 |
 | **非打包部署（WindowsPackageType=None + SelfContained）** | 免安装免签名，双击就跑；代价是要自己带 Windows App SDK 运行时（`publish/` 已含） |
 
 ## 4. 线程模型
 
 - **定时器线程**（`System.Threading.Timer` ×3）：主轮询 1 分钟（首扫 300ms 起跑）、快速发现 15 秒（`FastDiscoveryInterval`）、采样 `SampleIntervalMinutes`（首拍 1 分钟）。全部硬件 I/O 都在这几个线程上。
+- **设备拔出**：托盘窗口的 `WM_DEVICECHANGE` 立刻跑一次 `RequestReconcileAsync`（只做消失检测，不认领不写帧），15 秒节拍兜底。插入不做即时检测，靠原节拍或主界面「刷新」（`code-flow.md` §2.3）。
 - **轮次不并发、也不静默丢弃**：`RequestPollAsync()` / `RequestDiscoveryAsync()` 在 `_pollSync` 下复用进行中的 Task（`_currentPoll` / `_currentDiscovery`）；所有 pass 由 `SemaphoreSlim _passGate` 串行执行（插件内部字典不是线程安全的）。
 - **UI 线程**：只收事件（DispatcherQueue.TryEnqueue）和发起手动刷新（`await RequestPollAsync()`，返回的 Task 在整轮结束后完成，含 BLE 异步补读）。
 - **BLE**：DeviceWatcher 回调线程 + GATT 异步（SemaphoreSlim 限流，8 秒超时）。

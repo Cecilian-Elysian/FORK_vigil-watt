@@ -22,6 +22,9 @@ public sealed class DeviceRowModel
     public string SubText { get; init; } = "";
     public bool IsCharging { get; init; }
 
+    /// <summary>只有离线设备能删：在线设备删掉等于藏起来，插件下一轮又会报回来。</summary>
+    public bool IsOnline { get; init; } = true;
+
     /// <summary>来源徽标文字色（蓝牙蓝 / 2.4G 紫 / 本机青）。</summary>
     public Brush SourceBrush { get; init; } = UiPalette.Brush(UiPalette.Offline);
 
@@ -67,6 +70,7 @@ public sealed class DeviceRowModel
             SourceBackgroundBrush = UiPalette.Brush(UiPalette.Tint(sourceColor)),
             SubText = $"{d.Protocol}{state}{(remainingTime.IsAvailable ? $" · 约{RemainingTimeEstimator.Format(remainingTime.Remaining!.Value)}剩余" : $" · {remainingTime.Explain()}")} · 更新于 {d.LastUpdated:HH:mm:ss}",
             IsCharging = charging,
+            IsOnline = d.IsOnline,
             ProgressBrush = UiPalette.Brush(progressColor),
             PercentBrush = percentBrush,
         };

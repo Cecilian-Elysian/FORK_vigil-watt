@@ -1,7 +1,7 @@
 # GANSS GS3104T-Pro 2.4G 电量
 
 > 接收器 `VID_05AC&PID_024F`。帧样本来自贡献者 luze258 的抓包（PR #15），**本仓库维护者没有这台设备，未复测**。
-> 索引与其它设备见 [protocols.md](protocols.md) §11。
+> 索引与其它设备见 [protocols.md](protocols.md)。
 
 ## 1. 实测身份
 

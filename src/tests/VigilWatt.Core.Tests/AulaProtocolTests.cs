@@ -7,7 +7,7 @@ namespace VigilWatt.Core.Tests;
 /// <summary>
 /// 功 能： AULA F99 Pro 0x13 会话/推送帧的回归用例（复用 MchoseV1Codec）。
 /// 2026/10/19 15:10:00 xliu
-/// 样本帧来自贡献者，见 docs/hardware/protocols.md §9。
+/// 样本帧来自贡献者，见 docs/hardware/aula.md §1。
 /// </summary>
 public class AulaProtocolTests
 {

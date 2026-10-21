@@ -16,6 +16,7 @@
 
 - [build.md](dev/build.md)：构建、测试、发布和环境问题。
 - [runtime-pitfalls.md](dev/runtime-pitfalls.md)：HID、蓝牙、窗口、DPI 和 XAML 运行时问题。
+- [monitor-identity.md](dev/monitor-identity.md)：显示器身份与名称（贴片选屏），三套 API 实测对照与降级链。
 - [logging.md](dev/logging.md)：日志级别、文件位置、保留和排障用法。
 - [comment-style.md](dev/comment-style.md)：代码注释规范。
 - [review-standard.md](dev/review-standard.md)：审查标准、红线和闭环流程。
@@ -44,6 +45,7 @@
 | 设备读不到电量、读数异常、dongle 无响应或离线误判 | [hardware/protocols.md](hardware/protocols.md) · [hardware/debugging.md](hardware/debugging.md) |
 | 蓝牙设备未出现、类型识别错误或电量为空 | [project/code-flow.md](project/code-flow.md) · [dev/runtime-pitfalls.md](dev/runtime-pitfalls.md) |
 | 托盘、小组件、任务栏贴片显示或交互异常 | [dev/runtime-pitfalls.md](dev/runtime-pitfalls.md) |
+| 贴片选错屏、换显示模式后贴片不见、设置页屏幕名不对 | [dev/monitor-identity.md](dev/monitor-identity.md) |
 | 准备向设备发送数据 | 先读 [hardware/safety.md](hardware/safety.md)，再查 [hardware/sources.md](hardware/sources.md) |
 | 需要查看未修问题 | [reviews/BACKLOG.md](reviews/BACKLOG.md) |
 

@@ -4,7 +4,7 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:v="using:VigilWatt.App.ViewModels">
 
-    <Grid RowDefinitions="Auto,*" Padding="20,16">
+    <Grid RowDefinitions="Auto,*,Auto" Padding="20,16">
 
         <!-- 标题 + 副标题 + 右上操作（与统计 / 历史管理页同款） -->
         <Grid Grid.Row="0" ColumnDefinitions="*,Auto">
@@ -76,5 +76,11 @@
                        HorizontalAlignment="Center"
                        Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
         </StackPanel>
+
+        <!-- 已屏蔽设备入口：永久移除后设备不在列表里，恢复入口只能放这；没有屏蔽记录时整行隐藏 -->
+        <HyperlinkButton x:Name="BlockedBar" Grid.Row="2" Margin="0,4,0,0" Padding="0"
+                         HorizontalAlignment="Left" Click="ManageBlocked_Click" Visibility="Collapsed">
+            <TextBlock x:Name="BlockedText" FontSize="12" />
+        </HyperlinkButton>
     </Grid>
 </Page>

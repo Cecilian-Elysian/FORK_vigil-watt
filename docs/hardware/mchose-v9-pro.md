@@ -1,7 +1,7 @@
 # MCHOSE V9 Pro 耳机 2.4G 电量
 
 > 接收器 `VID_291D&PID_385D`。帧样本来自贡献者 luze258 在官方 MCHOSE HUB 显示 100% 时的 USB 抓包（PR #15），**本仓库维护者没有这台设备，未复测**。
-> 索引与其它设备见 [protocols.md](protocols.md) §12；同品牌的键盘/鼠标链路见 §1、§1.6。
+> 索引与其它设备见 [protocols.md](protocols.md)；同品牌的键盘/鼠标链路见 [mchose.md](mchose.md) §1、§1.6。
 
 ## 1. 实测身份
 

@@ -78,8 +78,65 @@ DiscoverOnlyAsync
 
 每轮的插件结果逐个 `Upsert(d)`（见 §5）。任何插件抛异常只记日志，不影响其他插件。
 
-## 3. 蓝牙设备流（BleBatteryWatcher + BluetoothClassicWatcher）
+### 2.2 设备身份（DeviceStatus.Id，2026-10-21 改）
 
+ID 是历史、自定义名称/图标、永久移除黑名单、统计的唯一键，**必须做到"换 USB 口不变"**。
+
+| 来源 | ID 形式 |
+|---|---|
+| 2.4G / 有线 | `{插件名}:{FNV1a64(端口无关键)}`；罗技再追加 `:{槽位}` |
+| 蓝牙 | `ble:` + AEP Id、`btc:` + Id（含 MAC，本来就与端口无关） |
+| 本机电池 | `sys:battery` |
+
+**端口无关键**：HID 实例段是 `7&15dc4901&0&0001` 四段，**前两段由 Windows 按物理端口生成**，后两段（`0&集合序号`）稳定。
+`PluginUtils.StableDeviceKey` 只抹前两段：
+
+```
+\\?\HID#VID_046D&PID_C548&MI_02&Col02#7&15dc4901&0&0001#{guid}
+                                         └─随端口─┘ └稳定┘
+```
+
+接收器不报序列号时，换口就是新实例、新路径；旧实现直接哈希整条路径，于是**同一个接收器换口后变成一台新设备**
+（历史分裂、自定义名丢失、黑名单失效）。本机 233 个 HID 接口的实例段都是这个格式，解析不认识就原样返回（退回旧行为）。
+
+代价：**同型号的两只接收器同时插着会被并成一台**（端口无关键相同，BACKLOG CR-74）。改身份规则等于换一次 ID，
+旧历史行留在库里（与 `architecture.md` 里"改协议后 ID 会变"同性质），用设备页右键删除清理。
+
+### 2.3 设备插拔（2026-10-21：拔出即时，插入按原节拍）
+
+HID 侧没有插拔事件。**两个方向的目标不同**：
+
+- **拔出要快**：设备已经不在了、条目还显示在线是错的。广播 + 15 秒兜底，约 0.3 秒下线。
+- **插入不快是正常的**：USB 复合设备从节点变化到接口可枚举有几百毫秒延迟，罗技接收器还要几秒才应答 HID++。
+  2026-10-21 曾为把它压到 1 秒叠过「1 秒路径检查 + 30 秒重试阶梯」，当天即回退——延时是硬件与驱动的固有成本。
+  插入走原节拍（15 秒档插件 ≤15 秒，其余 ≤60 秒），或用户点主界面「刷新」立即发现。
+
+| 触发 | 做什么 | 时延 |
+|---|---|---|
+| `WM_DEVICECHANGE`（托盘消息窗口） | `RequestReconcileAsync`：对所有启用插件做**消失检测**（只拆、不认领、不写帧） | ~0.3 秒 |
+| 15 秒快速发现节拍 | `DiscoverOnlyAsync` 开头的 `ReconcileAllEnabled`，同上，给不进 15 秒档的插件兜底 | ≤15 秒 |
+| 主界面「刷新」 | `RequestPollAsync` → `PollOnceAsync` → `AttachLabeledAsync`，会认领新设备 | 立即 |
+
+**插入为什么不在广播里认领**：`DBT_DEVNODES_CHANGED` 在插入方向实测经常收不到（拔掉能收到），
+且插入那一刻接口往往还没枚举出来，扫到的仍是旧集合。要覆盖它就得叠重试阶梯，成本远大于收益。
+
+**罗技"整轮无应答"不能按空槽缓存**：接口刚枚举出来就打开时，HID++ 常常整轮不答（实测 7 次 ping 全超时）。
+旧逻辑会把它当成"空接收器"按 5 分钟负缓存、句柄还一直复用——设备于是 5 分钟内不再被探。
+现在 `DiscoverDevices` 遇到"首次扫描一个都没认出来"就**先停监听、再丢弃句柄 + 清冷却 + 保留 `InitialScanDone = false`**，
+下一轮重开重扫；连续 5 次仍无应答才认命。这条与插入快慢无关，修的是"插上后 5 分钟不出现"。
+丢句柄前必须停监听：否则监听线程在已关闭的句柄上空转，且 `ListenTask` 非 null 会让新句柄永远不再启动监听。
+
+`IBatteryPlugin.ReconcileRemovals` 只做"扫描结果里没有 → 关句柄、停监听、释放认领、标离线"。
+15 秒节拍不能对它做 Attach——那会把会写帧的插件探测频率抬到 4 倍
+（`SupportsFastDiscovery` / `SupportsDiscoveryProbe` 的门槛就是为这个立的）。
+
+**必须把离线状态返回给 DeviceManager**：`Upsert` 存的是快照副本，插件改自己那份 `IsOnline` 传不到 UI
+——罗技 2026-10-21 之前就是漏了上报，拔掉后条目一直在线。
+
+设备**自己**休眠/静音仍走 §4.2 的延迟确认与沉默兜底（6~10 秒确认 / 60~90 秒兜底），**没有改快**：
+那些数值是拿真机噪音校准的（雷柏停手 = dongle 静音，静音 ≠ 离线），缩短只会换来误判。
+
+## 3. 蓝牙设备流（BleBatteryWatcher + BluetoothClassicWatcher）
 **发现**：`BluetoothLEDevice.GetDeviceSelector()` 建 DeviceWatcher，属性候选列表逐个试（本机只有 `System.Devices.Aep.IsConnected` 可用）。Added/Updated 回调 → HandleDevice → 组 DeviceStatus（含名称、连接态）→ DeviceUpdated → Manager.Upsert。
 
 **电量**：系统属性可靠时直接用；否则 `ReadBatteryViaGattAsync`——连接 → GetGattService(0x180F) → 读 characteristic(0x2A19) → 字节[0] 即百分比，8 秒超时，SemaphoreSlim 限流，每设备记录上次尝试时间避免频繁重试。
@@ -235,6 +292,23 @@ SafeSample（每 SampleIntervalMinutes 分钟）:
 - **蓝牙 / dongle 不被枚举**：它**从未进过列表**——北通关机后接收器可能连 HID 枚举都退出（实测 19:02 之后扫描里再无 `VID_20BC`），此时没有任何数据源，界面上它等于"从未存在过"，「共 N 台」恒等于「N 台在线」，这个总数没有信息量。
 
 解法：用历史库里**最近见过**的记录补一个离线条目（`TombstoneWindow` 内有历史、当前不在位），既让总数有意义，又不凭空造设备（有真实历史为凭）。**只在启动后跑一次**——进程中设备一旦被认领就常驻 `_devices`，不需要反复补。开关关着的系统电量（`sys:`）要跳过，别把它复活成离线占位。
+
+### 5.2 删除离线设备与两份名单（`DeviceManager.RemoveOfflineDevice`）
+
+删除 = 移除条目 + **删除该设备全部历史**（与历史页的"按设备删"共用 `DeleteDevices` + `Compact`）。只允许删离线外设：在线设备删了插件下一轮就报回来；`System` 设备归设置页开关管，不给删。
+
+两份名单语义不同，别合并：
+
+| 名单 | 写入时机 | 生效 | 解除 |
+|---|---|---|---|
+| `DismissedDevices`（删除标记，id → 时间戳） | 普通删除 | `Upsert` 丢弃该 id 的**离线**上报 | 设备重新上线（`IsOnline=true`）时自动清除 |
+| `BlockedDevices`（黑名单，id → 名称 + 时间） | 勾选「永久移除」 | `Upsert` 一律丢弃；插件认领前就跳过，不开句柄、不发帧 | 只能手动「解除屏蔽」 |
+
+**顺序：名单先落盘，再摘条目。** `Upsert` 是唯一汇入口、跑在插件线程上，反过来做会被插进空档把条目塞回去。`Save()` 返回 false 时撤销刚写的键并中止，条目与历史一个都不动。
+
+黑名单的执行点（缺一处就有漏洞）：`BatteryPluginBase.AttachAsync` 首遍跳过并释放已跟踪句柄、`LogitechPlugin.DiscoverDevices` 跳过槽位、两个蓝牙 watcher 的 `HandleDevice` 早退、`Upsert` 兜底、`RestoreOfflineTombstones` 跳过。
+
+**已知限制**：2.4G 的 Id 是 `插件名 + FNV1a(DevicePath)`，而 `DevicePath` 含 USB 端口实例路径——换口即换 Id，黑名单随之失效；BLE / 经典蓝牙按蓝牙地址生成，稳定。
 
 ## 6. 低电量提醒（DeviceManager.CheckLowBattery → App.AttachTray）
 

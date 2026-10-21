@@ -31,6 +31,8 @@
     它靠 HistoryStore(dbPath) 的可选构造参数指向临时库，测试因此不碰真实 history.db。
   -->
   <ItemGroup>
+    <Compile Include="..\..\VigilWatt.Core\Plugins\Thunderobot\ThunderobotCodec.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Plugins\Ajazz\AjazzCodec.cs" />
     <Compile Include="..\..\VigilWatt.Core\Plugins\BatteryReadingFilter.cs" />
     <Compile Include="..\..\VigilWatt.Core\Plugins\PluginUtils.cs" />
     <Compile Include="..\..\VigilWatt.Core\Plugins\DeviceClaimRegistry.cs" />
@@ -38,15 +40,22 @@
     <Compile Include="..\..\VigilWatt.Core\Plugins\WriteBackoff.cs" />
     <Compile Include="..\..\VigilWatt.Core\Plugins\Mchose\MchoseV1Codec.cs" />
     <Compile Include="..\..\VigilWatt.Core\Plugins\Mchose\MchoseMouseCodec.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Plugins\Mchose\MchoseK7Codec.cs" />
     <Compile Include="..\..\VigilWatt.Core\Plugins\Mchose\MchoseV9ProCodec.cs" />
     <Compile Include="..\..\VigilWatt.Core\Plugins\Mchose\MchoseInterfaceClassifier.cs" />
     <Compile Include="..\..\VigilWatt.Core\Plugins\Rapoo\RapooCodec.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Plugins\Cherry\CherryCodec.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Plugins\Pulsar\PulsarCodec.cs" />
     <Compile Include="..\..\VigilWatt.Core\Plugins\Hecate\HecateCodec.cs" />
     <Compile Include="..\..\VigilWatt.Core\Plugins\Delux\DeluxCodec.cs" />
     <Compile Include="..\..\VigilWatt.Core\Plugins\Delux\DockChargeFilter.cs" />
     <Compile Include="..\..\VigilWatt.Core\Plugins\Ganss\GanssCodec.cs" />
     <Compile Include="..\..\VigilWatt.Core\Plugins\Sony\DualSenseCodec.cs" />
     <Compile Include="..\..\VigilWatt.Core\Plugins\Betop\BetopCodec.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Plugins\Darkrim\DarkrimCodec.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Plugins\GameSir\GameSirCodec.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Plugins\Eweadn\EweadnKeyboardCodec.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Plugins\Eweadn\EweadnMouseCodec.cs" />
     <Compile Include="..\..\VigilWatt.Core\Plugins\Logitech\HidppCodec.cs" />
     <Compile Include="..\..\VigilWatt.Core\Ble\ClassicDeviceName.cs" />
     <Compile Include="..\..\VigilWatt.Core\Ble\WatcherProps.cs" />
@@ -60,6 +69,9 @@
     <Compile Include="..\..\VigilWatt.Core\Models\ChargingStateMap.cs" />
     <Compile Include="..\..\VigilWatt.Core\Devices\DeviceStatusMerger.cs" />
     <Compile Include="..\..\VigilWatt.Core\Devices\DeviceChangeDetector.cs" />
+    <!-- 删除设备后的"该不该收这条上报"判定：黑名单/删除标记四种组合，写错就是删了又复活 -->
+    <Compile Include="..\..\VigilWatt.Core\Devices\DeviceRemoval.cs" />
+    <Compile Include="..\..\VigilWatt.Core\Settings\BlockedDevice.cs" />
     <Compile Include="..\..\VigilWatt.Core\Devices\RemainingTimeEstimator.cs" />
     <Compile Include="..\..\VigilWatt.Core\Power\SystemPowerReader.cs" />
     <Compile Include="..\..\VigilWatt.Core\Power\SystemBatteryWatcher.cs" />
@@ -73,6 +85,8 @@
     <!-- 任务栏贴片的定位数学与取值收敛同样是零依赖纯逻辑（只碰 int/Math），定位算错必须能在单测里复现 -->
     <Compile Include="..\..\VigilWatt.App\Services\TaskbarLayout.cs" />
     <Compile Include="..\..\VigilWatt.App\Services\TaskbarBatteryMode.cs" />
+    <!-- 选屏逻辑（身份匹配 / 型号兜底 / 目标缺失降级主屏）是纯函数，换显示模式后贴片该去哪必须能单测 -->
+    <Compile Include="..\..\VigilWatt.App\Services\MonitorSelection.cs" />
     <!-- 更新日志解析是三处消费方共用的格式契约（打包截段、Release 正文、应用内渲染），
          解析错了只会表现为「更新内容空白」，必须能在单测里复现 -->
     <Compile Include="..\..\VigilWatt.App\Services\ReleaseNotes.cs" />

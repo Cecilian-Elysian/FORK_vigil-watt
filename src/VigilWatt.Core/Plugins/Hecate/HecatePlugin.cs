@@ -7,7 +7,7 @@ namespace VigilWatt.Core.Plugins.Hecate;
 /// <summary>
 /// 功 能： HECATE 2.4G 鼠标插件，只被动读取状态帧。
 /// 2026/10/19 14:55:00 xliu
-/// 帧布局见 docs/hardware/protocols.md §7。6 秒内没有任何报文则不认领。
+/// 帧布局见 docs/hardware/hecate.md §1。6 秒内没有任何报文则不认领。
 /// </summary>
 public sealed class HecatePlugin : BatteryPluginBase
 {

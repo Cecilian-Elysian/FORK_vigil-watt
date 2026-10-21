@@ -45,6 +45,10 @@ internal static class Native
     public const uint WM_RBUTTONUP = 0x0205;
     public const uint WM_NULL = 0x0000;
 
+    // ---- 设备变更（插拔广播，发给所有顶层窗口，不需要 RegisterDeviceNotification）----
+    public const uint WM_DEVICECHANGE = 0x0219;
+    public const uint DBT_DEVNODES_CHANGED = 0x0007;
+
     // ---- 菜单 ----
     public const uint MF_STRING = 0x0;
     public const uint MF_SEPARATOR = 0x800;
@@ -96,6 +100,10 @@ internal static class Native
 
     [DllImport("shell32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     public static extern bool Shell_NotifyIconW(uint message, ref NOTIFYICONDATAW data);
+
+    /// <summary>启动失败时的最后一道可见反馈：此刻 XAML 可能还没就绪，只能用原生弹窗。</summary>
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    public static extern int MessageBoxW(IntPtr hwnd, string text, string caption, uint type);
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     public static extern ushort RegisterClassW(ref WNDCLASSW wndClass);
@@ -185,6 +193,9 @@ internal static class Native
 
     /// <summary>任务栏主窗口类名（主显示器那块；任务栏被拖到副屏时它也跟过去）。</summary>
     public const string TaskbarClassName = "Shell_TrayWnd";
+
+    /// <summary>副屏任务栏窗口类名（Win10/Win11「在所有显示器上显示任务栏」时启用）。</summary>
+    public const string SecondaryTaskbarClassName = "Shell_SecondaryTrayWnd";
 
     /// <summary>任务栏内的通知区域（图标 + 时钟）类名，贴片就贴在它左边。</summary>
     public const string TrayNotifyClassName = "TrayNotifyWnd";
@@ -355,6 +366,13 @@ internal static class Native
     public const uint WM_LBUTTONDOWN = 0x0201;
     public const uint WM_MOUSEHOVER = 0x02A1;
     public const uint WM_MOUSELEAVE = 0x02A3;
+    public const uint WM_CAPTURECHANGED = 0x0215;
+    public const uint WM_MOUSEACTIVATE = 0x0021;
+
+    public const int MA_ACTIVATE = 1;
+    public const int MA_NOACTIVATE = 2;
+    public const int MA_ACTIVATEANDEAT = 3;
+    public const int MA_NOACTIVATEANDEAT = 4;
 
     /// <summary>UpdateLayeredWindow 的逐像素 alpha 模式（配合 AC_SRC_ALPHA 使用）。</summary>
     public const uint ULW_ALPHA = 0x00000002;
@@ -376,13 +394,15 @@ internal static class Native
         public uint dwHoverTime;
     }
 
-    [StructLayout(LayoutKind.Sequential)]
-    public struct MONITORINFO
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    public struct MONITORINFOEX
     {
         public uint cbSize;
         public RECT rcMonitor;
         public RECT rcWork;
         public uint dwFlags;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)]
+        public string szDevice;
     }
 
     [DllImport("user32.dll")]
@@ -395,7 +415,137 @@ internal static class Native
     public static extern IntPtr MonitorFromWindow(IntPtr hwnd, uint flags);
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
-    public static extern bool GetMonitorInfoW(IntPtr hMonitor, ref MONITORINFO info);
+    public static extern bool GetMonitorInfoW(IntPtr hMonitor, ref MONITORINFOEX info);
+
+    public delegate bool MonitorEnumProc(IntPtr hMonitor, IntPtr hdcMonitor, ref RECT lprcMonitor, IntPtr dwData);
+
+    [DllImport("user32.dll")]
+    public static extern bool EnumDisplayMonitors(IntPtr hdc, IntPtr lprcClip, MonitorEnumProc lpfnEnum, IntPtr dwData);
+
+    // ---- 显示器身份与友好名（QueryDisplayConfig）----
+    // MONITORINFOEX 只给 \\.\DISPLAYn：那是**当前显示配置里的序号**，换一次显示模式就可能指向另一块屏。
+    // EnumDisplayDevices 对内置屏常返回 "Generic PnP Monitor"。真实名称与跨模式稳定的身份只有 QDC 有，
+    // 实测对照见 docs/dev/monitor-identity.md。
+    public const uint QDC_ONLY_ACTIVE_PATHS = 0x00000002;
+    public const uint DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME = 1;
+    public const uint DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_NAME = 2;
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct LUID
+    {
+        public uint LowPart;
+        public int HighPart;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct DISPLAYCONFIG_PATH_SOURCE_INFO
+    {
+        public LUID adapterId;
+        public uint id;
+        public uint modeInfoIdx;
+        public uint statusFlags;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct DISPLAYCONFIG_RATIONAL
+    {
+        public uint Numerator;
+        public uint Denominator;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct DISPLAYCONFIG_PATH_TARGET_INFO
+    {
+        public LUID adapterId;
+        public uint id;
+        public uint modeInfoIdx;
+        public uint outputTechnology;
+        public uint rotation;
+        public uint scaling;
+        public DISPLAYCONFIG_RATIONAL refreshRate;
+        public uint scanLineOrdering;
+        public int targetAvailable;
+        public uint statusFlags;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct DISPLAYCONFIG_PATH_INFO
+    {
+        public DISPLAYCONFIG_PATH_SOURCE_INFO sourceInfo;
+        public DISPLAYCONFIG_PATH_TARGET_INFO targetInfo;
+        public uint flags;
+    }
+
+    /// <summary>模式数组只是"给 QDC 一块能写的缓冲"：内部联合体按 48 字节占位，总长与原生一致（64）。</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct DISPLAYCONFIG_MODE_INFO
+    {
+        public uint infoType;
+        public uint id;
+        public LUID adapterId;
+        public ulong union0, union1, union2, union3, union4, union5;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct DISPLAYCONFIG_DEVICE_INFO_HEADER
+    {
+        public uint type;
+        public uint size;
+        public LUID adapterId;
+        public uint id;
+    }
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    public struct DISPLAYCONFIG_TARGET_DEVICE_NAME
+    {
+        public DISPLAYCONFIG_DEVICE_INFO_HEADER header;
+        public uint flags;
+        public uint outputTechnology;
+        public ushort edidManufactureId;
+        public ushort edidProductCodeId;
+        public uint connectorInstance;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 64)] public string monitorFriendlyDeviceName;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)] public string monitorDevicePath;
+    }
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    public struct DISPLAYCONFIG_SOURCE_DEVICE_NAME
+    {
+        public DISPLAYCONFIG_DEVICE_INFO_HEADER header;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] public string viewGdiDeviceName;
+    }
+
+    [DllImport("user32.dll")]
+    public static extern int GetDisplayConfigBufferSizes(uint flags, out uint numPaths, out uint numModes);
+
+    [DllImport("user32.dll")]
+    public static extern int QueryDisplayConfig(uint flags, ref uint numPaths, [Out] DISPLAYCONFIG_PATH_INFO[] paths,
+        ref uint numModes, [Out] DISPLAYCONFIG_MODE_INFO[] modes, IntPtr currentTopologyId);
+
+    [DllImport("user32.dll")]
+    public static extern int DisplayConfigGetDeviceInfo(ref DISPLAYCONFIG_TARGET_DEVICE_NAME packet);
+
+    [DllImport("user32.dll")]
+    public static extern int DisplayConfigGetDeviceInfo(ref DISPLAYCONFIG_SOURCE_DEVICE_NAME packet);
+
+    // ---- 按设备路径查显示器名字（含未激活的屏）----
+    // QDC 对未激活的屏返回空名字，但 EnumDisplayDevices 的子设备仍带 EDID 名，
+    // 且带 EDD_GET_DEVICE_INTERFACE_NAME 时 DeviceID 与 QDC 的 monitorDevicePath 是同一条。
+    public const uint EDD_GET_DEVICE_INTERFACE_NAME = 0x00000001;
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    public struct DISPLAY_DEVICEW
+    {
+        public uint cb;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] public string DeviceName;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)] public string DeviceString;
+        public uint StateFlags;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)] public string DeviceID;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)] public string DeviceKey;
+    }
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    public static extern bool EnumDisplayDevicesW(string? device, uint devNum, ref DISPLAY_DEVICEW info, uint flags);
 
     public const byte AC_SRC_OVER = 0x00;
     public const byte AC_SRC_ALPHA = 0x01;
@@ -460,7 +610,16 @@ internal static class Native
     public static extern IntPtr SetCapture(IntPtr hwnd);
 
     [DllImport("user32.dll")]
+    public static extern IntPtr GetCapture();
+
+    [DllImport("user32.dll")]
     public static extern bool ReleaseCapture();
+
+    public const int VK_LBUTTON = 0x01;
+
+    /// <summary>贴片拖动靠它判断左键还按着没有：捕获对非前台窗口无效，只能轮询（runtime-pitfalls.md §16.5）。</summary>
+    [DllImport("user32.dll")]
+    public static extern short GetAsyncKeyState(int vKey);
 
     [DllImport("user32.dll")]
     public static extern bool IsWindow(IntPtr hwnd);

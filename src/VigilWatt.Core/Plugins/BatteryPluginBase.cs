@@ -1,3 +1,4 @@
+using VigilWatt.Core.Devices;
 using VigilWatt.Core.Hid;
 using VigilWatt.Core.Models;
 using VigilWatt.Core.Settings;
@@ -87,6 +88,9 @@ public abstract class BatteryPluginBase : IBatteryPlugin
     protected static bool IsWritesEnabled(string pluginName) =>
         AppSettings.Load().PluginEnabled.TryGetValue(pluginName, out var on) && on;
 
+    /// <summary>设备 ID：插件名 + 设备路径哈希。认领、黑名单、上报三处必须同一套规则，故只此一处生成。</summary>
+    protected string IdFor(string devicePath) => $"{Name.ToLowerInvariant()}:{PluginUtils.StableDeviceHash(devicePath)}";
+
     /// <summary>
     /// <see cref="Probe"/> 是否会向设备写帧：写帧的插件（迈从会话帧 / 北通查询）保持默认 true，
     /// 零写入探测（雷柏、英菲克纯被动）置 false。这是**机制事实**声明，与用户开关无关。
@@ -120,6 +124,8 @@ public abstract class BatteryPluginBase : IBatteryPlugin
         public readonly object IoGate = new();
         /// <summary>最近一次被动监听收到**任何**报文的时间（用于沉默离线；不是"解析成功"的时间）。</summary>
         public DateTimeOffset LastPassiveAt;
+        /// <summary>连续"读取立即返回 null"的次数：句柄失效的特征，用来触发退避（CR-75/76）。</summary>
+        public int FastNullReads;
         /// <summary>
         /// 插件标记的"离线候选"起始时刻（<c>default</c> = 无候选）。候选持续超过
         /// <see cref="OfflinePolicy.Confirm"/> 才真正判离线。
@@ -169,6 +175,19 @@ public abstract class BatteryPluginBase : IBatteryPlugin
         {
             if (!IsCandidate(info)) continue;
 
+            // 永久移除的设备：连句柄都不开、帧也不发。只挡 Upsert 的话，插件照样会写帧。
+            if (DeviceBlocklist.IsBlocked(IdFor(info.DevicePath)))
+            {
+                if (_devices.Remove(info.DevicePath, out var blocked))
+                {
+                    StopPassiveListen(blocked);
+                    blocked.Handle.Dispose();
+                    _claims.Release(info.DevicePath, Name);
+                    Log.Info($"{DisplayName} 设备已永久移除，释放接口: {info.DevicePath}");
+                }
+                continue;
+            }
+
             if (_devices.TryGetValue(info.DevicePath, out var known))
             {
                 known.Info = info;   // 重扫后元数据可能更新
@@ -195,22 +214,33 @@ public abstract class BatteryPluginBase : IBatteryPlugin
         }
 
         // 已拔出的设备
+        claimed.AddRange(ReconcileRemovals(availableDevices));
+        return claimed;
+    }
+
+    /// <summary>只拆"扫描结果里已经没有"的设备：关句柄、停监听、释放认领，不探测也不写帧。</summary>
+    public IReadOnlyList<DeviceStatus> ReconcileRemovals(IReadOnlyList<HidDeviceInfo> availableDevices)
+    {
+        // 空扫描 = CM 枚举失败，不是"设备全拔了"。当成全部拔出会让所有条目瞬间离线、句柄全关，
+        // 下一轮再重认领——一次 API 抖动变成全局抖动，且现场很难查。
+        if (availableDevices.Count == 0) return Array.Empty<DeviceStatus>();
+
+        var gone = new List<DeviceStatus>();
         foreach (var path in _devices.Keys.ToList())
         {
             if (availableDevices.Any(d => d.DevicePath == path)) continue;
-            if (_devices.Remove(path, out var gone))
+            if (_devices.Remove(path, out var dev))
             {
-                StopPassiveListen(gone);
-                gone.Handle.Dispose();
-                gone.Status.IsOnline = false;
+                StopPassiveListen(dev);
+                dev.Handle.Dispose();
+                dev.Status.IsOnline = false;
                 _claims.Release(path, Name);
                 Log.Info($"{DisplayName} 设备已移除: {path}");
                 // DeviceManager 只收返回列表；不上报则拔出后条目永远在线。
-                claimed.Add(gone.Status);
+                gone.Add(dev.Status);
             }
         }
-
-        return claimed;
+        return gone;
     }
 
     /// <summary>打开句柄并跑协议探测。成功返回持有句柄 + 探测值；失败/异常返回空句柄并已释放。</summary>
@@ -264,7 +294,7 @@ public abstract class BatteryPluginBase : IBatteryPlugin
             var (protocol, percent, charging) = probe;
             var status = new DeviceStatus
             {
-                Id = $"{Name.ToLowerInvariant()}:{PluginUtils.StableHash(o.Info.DevicePath)}",
+                Id = IdFor(o.Info.DevicePath),
                 Name = BuildDisplayName(o.Info),
                 Source = Source,
                 Kind = ResolveKind(protocol),
@@ -302,10 +332,16 @@ public abstract class BatteryPluginBase : IBatteryPlugin
                 try
                 {
                     byte[]? input;
+                    var started = Environment.TickCount64;
                     lock (dev.IoGate)
                         input = dev.Handle.ReadInput(TimeSpan.FromMilliseconds(500));
                     if (input == null)
                     {
+                        // 正常静音要等满 500ms；连续几次几十毫秒就返回说明句柄已失效（ReadInput 立即 null）。
+                        // 不退避的话这个 while 会变成每秒几万次空转、烧满一个核（CR-75/76）。
+                        dev.FastNullReads = Environment.TickCount64 - started < 100 ? dev.FastNullReads + 1 : 0;
+                        if (dev.FastNullReads >= 3) Thread.Sleep(200);
+
                         // 静音期不是无事可做：延迟离线确认、半开重试与"立刻核实"靠的都是这里的节拍（约 500ms 一次）。
                         CheckOfflineCandidate(dev);
                         CheckPassiveSilence(dev);
@@ -313,6 +349,7 @@ public abstract class BatteryPluginBase : IBatteryPlugin
                         RunPendingConfirm(dev);
                         continue;
                     }
+                    dev.FastNullReads = 0;
 
                     // 收到**任何**报文都算"设备还活着"，不只是本协议能解析出来的帧（雷柏的活动心跳
                     // 0x07 一停手就静音，同一接口上还有大量 0x00/0x04/0x05 报文）。
@@ -353,7 +390,8 @@ public abstract class BatteryPluginBase : IBatteryPlugin
     }
 
     /// <summary>
-    /// 把设备标为离线——**所有离线路径的唯一落地点**：翻 IsOnline、盖时间戳、记日志、立即推送。
+    /// 把设备标为离线——**插件内软离线（休眠/静音/占位帧）的唯一落地点**：翻 IsOnline、盖时间戳、记日志、立即推送。
+    /// 拔出走 <see cref="ReconcileRemovals"/>：它不该盖时间戳（最后在线时刻就是那个值）。
     /// <b>幂等</b>：已经离线就什么都不做并返回 false。返回值只表示"本次真的翻转了"。
     /// </summary>
     private bool MarkOffline(TrackedDevice dev, string reason)

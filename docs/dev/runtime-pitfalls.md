@@ -481,6 +481,24 @@ light-dismiss，**用它右键菜单就关不掉**。所以贴片的右键菜单
 **注意命中测试按 alpha 判定**（§16.1）：整块位图铺了 alpha=1 的"不可见底"，
 所以留白处也能按下拖动；否则只有文字/图形像素能拖。
 
+#### 16.5.1 拖动消息被 Win11 任务栏吃掉：轮询 fallback（2026-10-20 实修）
+
+**症状**：拖动"有时失效"——按下去贴片跟一下，鼠标稍微上下飘一点就断；开机或解锁后第一次可能正常，之后再也不行。
+
+**根因（三层）**：
+1. `SetCapture` 文档写明 **Only the foreground window can capture the mouse**；贴片带 `WS_EX_NOACTIVATE`，本线程几乎永远不是前台线程，所以 `SetCapture` 不报错但等于没抓到。
+2. **更深层**：Win11 任务栏（XAML 架构）的输入管理器在 `WM_MOUSEACTIVATE` 阶段就把子窗口的后续点击消息拦截了。诊断日志显示：第一次成功时 `WM_MOUSEACTIVATE → WM_POINTERDOWN → WM_LBUTTONDOWN` 完整链路；失败后只有 `WM_MOUSEACTIVATE`，后续点击消息彻底消失。
+3. **连带 bug**：光标在贴片外松手 → `WM_LBUTTONUP` 永远不投递 → `_dragging` 卡在 `true`，之后悬停贴片自己跳，且每秒 `ApplyPosition` 持续写回记忆。
+
+**修法**：
+1. **主方案**：`WM_MOUSEACTIVATE` 中让 `DefWindowProcW` 先处理（子窗口默认会把消息发给父窗口），只在父窗口要 `MA_ACTIVATEANDEAT` 时才干预为 `MA_NOACTIVATE`——保留双击等正常行为。
+2. **Fallback**：常驻 10Hz 轮询检测按键状态（`GetAsyncKeyState` + `GetCursorPos`）。光标在贴片内 + 左键按下 → 启动拖动；松手 → 结束拖动。拖动中切到 60Hz，手停住 3 拍后回退到 10Hz。
+3. **彻底去掉 `SetCapture`**：跨进程子窗口 + 任务栏 XAML 环境下，捕获不仅无效，还会触发输入管理器的拦截行为。
+
+- 不装钩子、不发合成输入；
+- 偏移没变就不写设置，单击不产生磁盘写；
+- 设置页新增「重置贴片位置」按钮，offset 归零 + 按当前 DPI 绑定。
+
 ### 16.6 本机电量恒定排除
 
 Windows 任务栏**自己就有一个电池图标**，贴片再重复一遍纯属噪音。
@@ -635,6 +653,18 @@ UIA 收集系统元素矩形（按类名/AutomationId 模式匹配——Name 随
   避让解决了重叠，但没解决贴片自己那几像素透明区。
 
 
+### 16.12 贴片尺寸必须每拍按当前缩放重算（2026-10-20）
+
+**症状**：换线（HDMI → USB-C / 走扩展坞）后贴片大小不对，而且一直不对，重启应用才恢复。
+
+**根因**：高度只在「任务栏矩形变了」时才重算。换线后缩放会变，而任务栏的**像素**尺寸可能恰好没变
+（同一分辨率、只换了连接方式），于是尺寸一直沿用旧值。另一个入口是 `GetDpiForWindow` 在句柄重建瞬间返回 0：
+那时若按 `scale = 1` 兜底算，会得到 100% 下的尺寸并同样卡住。
+
+**规则**：高度每拍按 `rect` + `dpi / 96` 重算；**高度或缩放任一变化都要重画**（宽度、字号、圆角都按缩放算）。
+`dpi == 0` 时直接跳过这一拍，不要按 1.0 兜底。
+
+## 17. WinUI3 窗口的两层背景：小组件白底（2026-10-10 起；§17.1 于 10-12 更正）
 
 > **2026-10-12 起，本节只对"小组件"（`WidgetWindow`，仍是 WinUI 3 窗口）适用。**
 > 贴片已改成**原生分层窗口**（§16），窗口由自己 `CreateWindowExW` 建、类背景刷为空、
@@ -891,3 +921,89 @@ if (msg == Native.WM_PAINT) { /* BeginPaint → FillRect(BLACK_BRUSH) → EndPai
 把 XBF 解析与控件构造的一次性开销提前付掉；整段 `try/catch` 兜底，失败只记日志并退回设备页。
 
 **未真机点检**：缓存后的实际切换手感、首次打开设置页的耗时、预热对启动时间的影响，都需要人手复看。
+
+## 20. 从 `bin` 启动后写盘全被拒、没有托盘图标：exe 继承了工作区的 Low 完整性标签（2026-10-20 定案）
+
+**症状**（一起出现，很容易误判成好几个 bug）：
+
+- 应用能启动、能进设置页，但**日志一行不写**（`app-yyyy-MM-dd.log` 的 mtime 停在旧时间）
+- 点「保存」弹「设置保存失败，无法写入 settings.json」，或弹「开机自启未生效」
+- 托盘没有图标（`Shell_NotifyIcon` 失败）
+- 任务栏贴片、小组件跑到屏幕原点（拿不到 `Shell_TrayWnd` 句柄）
+- 点几次保存后进程退出（`Microsoft.UI.Xaml.dll` / `0xc000027b`）
+
+**根因（一句话）**：工作区目录被打上了 `Low` 完整性标签，`dotnet build` 产出的 exe 通过继承拿到同一个标签，
+于是**进程以 Low IL 运行**。Low IL 不能向 Medium IL 写（No-Write-Up），而 `%LOCALAPPDATA%`、
+`HKCU` 下的注册表、explorer 的 shell 消息**全是 Medium IL**——一次降权，四处受挫。
+
+**这只影响开发版**：正式版装在 `%LOCALAPPDATA%\VigilWattApp\`（Medium IL），不经过工作区目录，
+所以上面这一串症状在正式版里**不会出现**。遇到它们先确认跑的是不是 `bin\...\win-x64` 那份。
+
+**一条命令定性**（不用管理员、不用探针）：
+
+```
+icacls "<exe 路径>" | findstr Mandatory
+→ Mandatory Label\Low Mandatory Level:(I)(NW)     ← (I)=继承来的，NW=不许向上写
+```
+
+对照本机 2026-10-20 实测：
+
+| 对象 | 完整性标签 |
+|---|---|
+| 工作区根 `...\Documents\10-project\vigil-watt` | `Low (OI)(CI)(NW)` |
+| 其中 `bin\...\win-x64\VigilWatt.App.exe` | `Low (I)(NW)` —— 继承自上面 |
+| `C:\Users\<用户>\AppData\Local` | 无 `Mandatory` 行 = 默认 **Medium** |
+| 复制到 `C:\VigilWattTest\` 的那份 exe | **Medium**（新目录是默认级别） |
+
+**为什么症状是这一组**：
+
+| 被拒的操作 | 目标 IL | Low 进程的结果 |
+|---|---|---|
+| 写 `%LOCALAPPDATA%`（日志 / settings / history） | Medium | `Access denied` |
+| 写 `HKCU\...\CurrentVersion\Run` | Medium | `Access denied`（键的 ACL 是 FullControl，所以看着像"键坏了"） |
+| `Shell_NotifyIcon` / 找 `Shell_TrayWnd` | explorer 是 Medium | UIPI 拦消息 → 没托盘、贴片定位退化到原点 |
+| 写 exe 旁边的 `data\` | Low（同目录） | **成功**——所以"工作区能写、用户目录不能写" |
+
+**A/B 实测**（同一份产物，2026-10-20 23:05 与 23:09 两次双击，只差 `icacls` 一行）：
+
+| 条件 | 日志 |
+|---|---|
+| `Low` | `Shell_NotifyIcon 失败` ×4、`写入开机自启失败: Access denied` |
+| `Medium` | `进程身份: … 完整性=Medium …` + `托盘图标已创建`，无任何失败 |
+
+**怎么办（已落地，不要临时手工改）**：
+
+1. **构建后自动提回 Medium**：`VigilWatt.App.csproj` 的 `RestoreExeIntegrityLevel` target 在 Debug 构建后
+   执行 `icacls "$(TargetDir)$(AssemblyName).exe" /setintegritylevel Medium`。**每次重建 exe 都会重新继承
+   Low，所以这一步不能省**，否则"改完还是崩"会反复出现；
+2. `scripts\run-app.ps1` 启动前再提一次，兜住"直接跑旧产物"的情况；
+3. **不要改工作区目录本身的标签**（`icacls <dir> /setintegritylevel Medium`）：那是沙箱的隔离边界，
+   可能被重置，而且会让沙箱侧的进程写不了源码；
+4. 旧办法仍然可用：`run-app.ps1 -Copy` 复制到工作区之外再启动（新目录天然是 Medium）。
+
+**被放大的代码 bug（已修，别改回去）**：`AutostartService.SetEnabled` 把异常直接抛给
+`SettingsPage.Save_Click`，于是**每点一次保存就记一次未处理异常**；全局熔断器（`App.xaml.cs`，
+1 分钟 5 次）数满 5 次后 `e.Handled = false`，进程按崩溃路径退出。用户看到的是
+"点保存没反应，点几次软件就没了"。修法：`TrySetEnabled(enabled, out error)` 内部收口，
+失败只弹「开机自启未生效」并继续保存其他设置。
+**教训**：UI 事件处理器里不许让资源访问异常逸出——熔断器会把它升级成进程退出。
+
+**排查时踩的三个错判**（都记下来，别再犯）：
+
+- **"桌面目录被保护"**：换目录有时好有时坏 → 真正变的是那个目录有没有 Low 标签，与目录名字无关；
+- **"腾讯电脑管家在拦"**：管家的三个 FSFilter 驱动确实在跑，但拦截日志为空、加信任区无效；
+  `icacls` 一查就知道是完整性级别，与过滤驱动无关。枚举驱动的方式（`HKLM\SYSTEM\CurrentControlSet\Services`
+  下 `Group` 以 `FSFilter` 开头的项）可以留着备用，但**先查 `icacls`**；
+- **"进程是沙箱账户跑的"**：22:50 那次看到 `data\` 能写、用户目录不能写，误判成 `CodexSandboxOnline`
+  在跑。实际 `data\` 下所有文件的 `Owner` 都是本人、父进程是 `explorer.exe`、日志打的是
+  `用户=OCTX-EVREN\20211`——**是同一账户被降权，不是换了账户**。判据：`Owner` + 父进程 + 完整性级别。
+
+**留存的诊断**（一次性探针已删，只留这几处，出问题时会自己说话）：
+
+- `Log.TryProbeWriter(out error)`：启动时试开当天日志，失败就弹窗报出路径与真实异常。
+- `AppSettings.LastSaveError`：保存失败的真实异常，随设置页弹窗显示。
+- `StartupGuard`：`OnLaunched` 的 `StartCore` 全程 `try/catch`，失败落日志 + 原生弹窗，不再静默死亡。
+- `AutostartService.TrySetEnabled(out error)`：写 Run 键失败时弹「开机自启未生效」并带真实异常，
+  同时它自己也不再抛——既是诊断，也是"UI 事件不许逸出异常"的示范。
+- `ProcessIdentity.Describe()`：启动日志第二行打 `用户= 会话= 管理员= 完整性= 沙箱组=`。
+  **`完整性` 不是 Medium 就不用往下查了**——先把 exe 提回 Medium 再说。

@@ -24,7 +24,7 @@ internal readonly record struct RapooStatus(
 /// <summary>
 /// 功 能： 雷柏 2.4G 状态帧（report 0x07，19 字节）的**纯帧解析**，不碰句柄、不写日志，便于单测。
 /// 2026/10/08 22:25:16 xliu
-/// 帧布局见 docs/hardware/protocols.md §3。
+/// 帧布局见 docs/hardware/rapoo.md §1。
 /// </summary>
 internal static class RapooCodec
 {

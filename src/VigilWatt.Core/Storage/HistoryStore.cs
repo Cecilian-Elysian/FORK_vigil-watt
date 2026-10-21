@@ -12,6 +12,9 @@ public record DeviceHistoryStat(string DeviceId, string Name, DeviceKind Kind, i
 /// <summary>整库概览（历史管理页顶部卡片用）。空库时 First/Last 为 null。</summary>
 public record HistoryStats(int TotalCount, int DeviceCount, DateTimeOffset? First, DateTimeOffset? Last, long FileBytes);
 
+/// <summary>单台设备的历史概况（删除设备确认框用）。没有记录时 First/Last 为 null。</summary>
+public record DeviceHistorySummary(int Count, DateTimeOffset? First, DateTimeOffset? Last);
+
 /// <summary>
 /// 功 能： 电量历史 SQLite 存储。
 /// 2026/10/06 15:53:36 xliu
@@ -217,6 +220,23 @@ public class HistoryStore : IDisposable
     /// <summary>ORDER BY 用：0 = 可显示名，1 = 占位（空 / 等于 device_id / 含 Bluetooth#）。全是占位时仍取最新一条。</summary>
     private const string PreferredNameSql =
         "CASE WHEN name = '' OR name = device_id OR INSTR(name, 'Bluetooth#') > 0 THEN 1 ELSE 0 END";
+
+    /// <summary>单台设备的记录条数与时间范围。走 (device_id, ts) 索引；别用 <see cref="GetDeviceStats"/>，那是全表窗口函数。</summary>
+    public DeviceHistorySummary GetDeviceSummary(string deviceId)
+    {
+        lock (_writeGate)
+        {
+            using var cmd = _connection.CreateCommand();
+            cmd.CommandText = "SELECT COUNT(*), MIN(ts), MAX(ts) FROM samples WHERE device_id = $id";
+            cmd.Parameters.AddWithValue("$id", deviceId);
+            using var reader = cmd.ExecuteReader();
+            if (!reader.Read()) return new DeviceHistorySummary(0, null, null);
+            return new DeviceHistorySummary(
+                reader.GetInt32(0),
+                reader.IsDBNull(1) ? null : DateTimeOffset.FromUnixTimeMilliseconds(reader.GetInt64(1)),
+                reader.IsDBNull(2) ? null : DateTimeOffset.FromUnixTimeMilliseconds(reader.GetInt64(2)));
+        }
+    }
 
     /// <summary>删除指定设备的全部历史，返回删除条数。空集合直接返回 0（不拼 SQL）。</summary>
     public int DeleteDevices(IReadOnlyCollection<string> deviceIds)

@@ -1,5 +1,6 @@
 using Velopack;
 using VigilWatt.App.Services;
+using VigilWatt.Core.Utils;
 
 namespace VigilWatt.App;
 
@@ -15,7 +16,12 @@ internal static class Program
     {
         VelopackApp.Build()
             // 卸载时清掉开机自启残留（HKCU Run 的 VigilWatt 值是应用自己在设置页写的）
-            .OnBeforeUninstallFastCallback(_ => AutostartService.SetEnabled(false))
+            .OnBeforeUninstallFastCallback(_ =>
+            {
+                // 清不掉只留痕：卸载本身不能被注册表权限问题挡住
+                if (!AutostartService.TrySetEnabled(false, out var error))
+                    Log.Warn("卸载时清除开机自启失败: " + error);
+            })
             .Run();
 
         WinRT.ComWrappersSupport.InitializeComWrappers();

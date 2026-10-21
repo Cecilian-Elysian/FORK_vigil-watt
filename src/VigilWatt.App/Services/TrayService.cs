@@ -27,6 +27,9 @@ public sealed class TrayService : IDisposable
     /// <summary>刷新请求是否已排队（1 = 已排）。设备事件每轮会连打好几次，靠它合并成一次。</summary>
     private int _updateQueued;
 
+    /// <summary>插拔处理是否已排队（1 = 有一轮在跑），用来把同一秒内的多条广播合并成一次。</summary>
+    private int _deviceChangeQueued;
+
     private readonly AppServices _services;
 
     public TrayService(AppServices services)
@@ -120,8 +123,40 @@ public sealed class TrayService : IDisposable
                 self.UpdateIcon();
                 return IntPtr.Zero;
             }
+            // 拔掉设备：立刻做消失检测（不认领），否则要等 15 秒/60 秒节拍才拆会话（见 code-flow.md §2.3）
+            if (msg == Native.WM_DEVICECHANGE)
+            {
+                // 留 Info 档：这条是"广播到底有没有到窗口"的唯一证据，开发版默认 Info 也能看见
+                Log.Info($"设备变更广播: wParam=0x{wParam:X4}");
+                // 只认 DBT_DEVNODES_CHANGED：它是广播给所有顶层窗口的。DBT_DEVICEARRIVAL /
+                // DBT_DEVICEREMOVECOMPLETE 要先 RegisterDeviceNotification 才会送到窗口，没注册写了也不会命中。
+                if ((uint)wParam == Native.DBT_DEVNODES_CHANGED) self.ScheduleDeviceChange();
+            }
         }
         return Native.DefWindowProcW(hwnd, msg, wParam, lParam);
+    }
+
+    /// <summary>插拔广播合并成 300ms 后的一轮消失检测。WndProc 在 UI 线程上，扫描必须扔后台。</summary>
+    private void ScheduleDeviceChange()
+    {
+        if (Interlocked.Exchange(ref _deviceChangeQueued, 1) == 1) return;
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await Task.Delay(300).ConfigureAwait(false);
+                await _services.Manager.RequestReconcileAsync().ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                Log.Warn("插拔移除检测失败: " + ex.Message);
+            }
+            finally
+            {
+                Interlocked.Exchange(ref _deviceChangeQueued, 0);
+            }
+        });
     }
 
     private void HandleTrayMessage(uint mouseMessage)

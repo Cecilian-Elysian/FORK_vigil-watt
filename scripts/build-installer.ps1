@@ -56,7 +56,7 @@ $dist = Join-Path $root "dist"
 $vpkArgs = @(
     "pack"
     "--packId", "VigilWattApp"
-    "--packTitle", "VigilWatt"
+    "--packTitle", "VigilWatt 无线设备电量监控"
     "--packVersion", $Version
     "--packDir", $publishDir
     "--mainExe", "VigilWatt.App.exe"

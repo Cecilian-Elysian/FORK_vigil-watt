@@ -13,29 +13,34 @@ public static class HidDeviceScanner
     private static readonly object CacheGate = new();
     private static readonly Dictionary<string, HidDeviceInfo> Cache = new(StringComparer.OrdinalIgnoreCase);
 
-    public static List<HidDeviceInfo> Scan()
+    /// <summary>只列接口路径，**不开任何句柄**（<see cref="Scan"/> 在它为每个新路径读 caps 之前先拿清单）。</summary>
+    public static string[] EnumeratePaths()
     {
-        var list = new List<HidDeviceInfo>();
-        var meta = new List<string>();
         var guid = NativeHid.GuidDeviceInterfaceHid;
-
         if (NativeHid.CM_Get_Device_Interface_List_SizeW(out uint size, ref guid, null,
                 NativeHid.CM_GET_DEVICE_INTERFACE_LIST_PRESENT) != 0 || size == 0)
-        {
-            lock (CacheGate) Cache.Clear();
-            return list;
-        }
+            return Array.Empty<string>();
 
         var buffer = new char[size];
         if (NativeHid.CM_Get_Device_Interface_ListW(ref guid, null, buffer, size,
                 NativeHid.CM_GET_DEVICE_INTERFACE_LIST_PRESENT) != 0)
+            return Array.Empty<string>();
+
+        // 多字符串（double-null 结尾）
+        return new string(buffer).Split('\0', StringSplitOptions.RemoveEmptyEntries);
+    }
+
+    public static List<HidDeviceInfo> Scan()
+    {
+        var list = new List<HidDeviceInfo>();
+        var meta = new List<string>();
+        var paths = EnumeratePaths();
+        if (paths.Length == 0)
         {
             lock (CacheGate) Cache.Clear();
             return list;
         }
 
-        // 多字符串（double-null 结尾）
-        var paths = new string(buffer).Split('\0', StringSplitOptions.RemoveEmptyEntries);
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         lock (CacheGate)

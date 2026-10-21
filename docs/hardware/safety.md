@@ -42,16 +42,20 @@
 5. **被动优先**：能靠监听（input report / feature GET）解决的不写入。迈从 dongle 的自发推送（`13 0A` 帧）就是免费数据源。
 6. **新设备接入流程**：先被动监听看日志 → 再查官方驱动是否支持（支持就抓官方的包）→ 拿到精确帧后才允许写入验证。全程用户知情。
 7. **任何"诊断/扫描"代码不得留在正常执行路径上**（哪怕有开关）。要实验就在独立脚本（test-*.ps1 / python）里做，用户点头后再跑。
-   - **2026-10-10 修复轮已清**：`HidWriteProbe` 写入变体矩阵已删除；曾留在正常路径的 Elan feature 扫描（CR-10）随后整插件已删（见 protocols.md §3）。要排查，按本条在独立脚本里做。
+   - **2026-10-10 修复轮已清**：`HidWriteProbe` 写入变体矩阵已删除；曾留在正常路径的 Elan feature 扫描（CR-10）随后整插件已删（见 rose.md）。要排查，按本条在独立脚本里做。
 
 ### 3.1 各插件写入开关现状（2026-10-10 取消独立许可后逐条核对）
 
 | 插件 | 写入开关（= 插件开关） | 默认 | 说明 |
 |---|---|---|---|
-| 迈从 | `PluginEnabled["Mchose"]` | **false** | dongle 协议未破解，探测写入可能干扰设备，故默认关；开插件即授权写帧。**一个开关管键盘、鼠标、V9 Pro 耳机三类设备**（品牌级，`AGENTS.md` §9） |
+| 迈从 | `PluginEnabled["Mchose"]` | **false** | dongle 协议未破解，探测写入可能干扰设备，故默认关；开插件即授权写帧。**一个开关管键盘、鼠标、V9 Pro 耳机、K7 鼠标四类设备**（品牌级，`AGENTS.md` §9） |
 | 北通 | `PluginEnabled["Betop"]` | **true** | 查询是官方客户端同款只读命令（cmd=0x5），风险低，故默认开 |
 | 罗技 | `PluginEnabled["Logitech"]` | **false** | 发现与读数**全靠写帧**；不继承基类，故自建闸门（`HidppIO.WritesAllowed`）+ 熔断 + 同一张递增退避表（`Plugins/WriteBackoff.cs`） |
 | 雷柏 | 无（纯被动） | — | `WritesEnabled => false` + `ProbeWrites => false`，零写入 |
+| 黑爵 | `PluginEnabled["Ajazz"]` | **false** | 3151:4011 已验证 F7 状态查询；见 `ak870-ml903.md` |
+| 雷神 | `PluginEnabled["Thunderobot"]` | **false** | 369B:0234 官方 02 设备信息查询；见 `ak870-ml903.md` |
+| 樱桃 | `PluginEnabled["Cherry"]` | **false** | 046A 块通道读 `0x1A` 必须发帧；`SupportsDiscoveryProbe` + `ProbeCooldown` 10s；见 `cherry.md` §1.7 |
+| 派世 | `PluginEnabled["Pulsar"]` | **false** | 3554:F508 的 STATUS/POWER 两帧查询；同上节拍；见 `pulsar.md` §1.6 |
 | 英菲克 | 无（纯被动） | — | `WritesEnabled => false` + `ProbeWrites => false`；仅读 report `0x03` |
 | HECATE | 无（纯被动） | — | `WritesEnabled => false` + `ProbeWrites => false`；仅读 `35BB:D00B` 的 report `0x04` |
 | DELUX | 无（纯被动） | **false** | 与英菲克同 VID/PID，只读 `0x000A`；本机未扫到接收器，故默认关 |

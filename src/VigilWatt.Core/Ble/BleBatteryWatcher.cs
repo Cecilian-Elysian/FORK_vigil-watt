@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using VigilWatt.Core.Devices;
 using VigilWatt.Core.Models;
 using VigilWatt.Core.Utils;
 using Windows.Devices.Bluetooth;
@@ -70,6 +71,14 @@ public sealed class BleBatteryWatcher : IDisposable
 
     private void HandleDevice(string id, IReadOnlyDictionary<string, object> props, string? name)
     {
+        // 永久移除的设备：不再跟踪、不再 GATT 直读（否则每次 Updated 都会白读一轮）
+        if (DeviceBlocklist.IsBlocked($"ble:{id}"))
+        {
+            if (_devices.TryRemove(id, out var blocked))
+                Log.Info($"BLE 设备已永久移除，停止跟踪: {blocked.DisplayName}");
+            return;
+        }
+
         // Updated 只带变化的属性：IsConnected 缺失时必须沿用现状，不能默认 false
         // （真机 2026-10-08：戴尔 WK717 已连接却被后续 Updated 误判离线，与经典蓝牙同坑）
         bool? connected = WatcherProps.ReadConnected(props);

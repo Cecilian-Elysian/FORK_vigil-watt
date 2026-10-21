@@ -218,4 +218,24 @@ public sealed class HistoryStoreTests : IDisposable
         Assert.Equal("新名", store.GetDeviceStats().Single().Name);
         Assert.Equal("新名", store.DistinctDevices(T0).Single().Name);
     }
+
+    [Fact]
+    public void H13_单台概况只统计该设备的条数与时间范围()
+    {
+        using var store = NewStore();
+        store.Insert(Dev("kb", "键盘", 90, T0));
+        store.Insert(Dev("kb", "键盘", 88, T0.AddHours(2)));
+        store.Insert(Dev("mouse", "鼠标", 50, T0.AddHours(5)));
+
+        var kb = store.GetDeviceSummary("kb");
+        Assert.Equal(2, kb.Count);
+        Assert.Equal(T0, kb.First);
+        Assert.Equal(T0.AddHours(2), kb.Last);
+
+        // 删除确认框靠这三个值写文案：没有记录时必须给 0 和两个 null，不能抛
+        var none = store.GetDeviceSummary("nope");
+        Assert.Equal(0, none.Count);
+        Assert.Null(none.First);
+        Assert.Null(none.Last);
+    }
 }
