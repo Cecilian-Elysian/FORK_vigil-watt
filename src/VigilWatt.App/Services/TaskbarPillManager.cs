@@ -30,7 +30,12 @@ public sealed class TaskbarPillManager : IDisposable
     {
         _timer = _dispatcher.CreateTimer();
         _timer.Interval = TimeSpan.FromMilliseconds(ReconcileIntervalMs);
-        _timer.Tick += (_, _) => Reconcile();
+        _timer.Tick += (_, _) =>
+        {
+            // DispatcherQueueTimer 回调里的未捕获异常会绕过 Application.UnhandledException 直接 fail-fast
+            try { Reconcile(); }
+            catch (Exception ex) { Log.Warn($"任务栏贴片协调层异常: {ex.Message}"); }
+        };
         _timer.Start();
         Reconcile();
     }

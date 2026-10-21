@@ -88,6 +88,9 @@ public sealed class TaskbarPillWindow : IDisposable
 
     private int _uploadedX = int.MinValue, _uploadedY = int.MinValue, _uploadedW = -1, _uploadedVersion = -1;
 
+    /// <summary>协调层回调：任务栏失效或 DPI 变化时通知上层拆旧建新。</summary>
+    private readonly Action? _onInvalidate;
+
     /// <summary>窗口仍有效（未销毁）。供协调层快速路径判断。</summary>
     public bool IsWindowValid => _hwnd != IntPtr.Zero && Native.IsWindow(_hwnd);
 
@@ -280,7 +283,6 @@ public sealed class TaskbarPillWindow : IDisposable
             if (Native.IsWindow(_hwnd)) Native.DestroyWindow(_hwnd);
             _hwnd = IntPtr.Zero;
         }
-        _taskbar = IntPtr.Zero;
         _windowDpi = 0;
         ReleaseDib();
         _bitmap?.Dispose();
@@ -927,7 +929,7 @@ public sealed class TaskbarPillWindow : IDisposable
         if (_hwnd == IntPtr.Zero) return default;
         var mon = Native.MonitorFromWindow(_hwnd, Native.MONITOR_DEFAULTTONEAREST);
         if (mon == IntPtr.Zero) return default;
-        var info = new Native.MONITORINFO { cbSize = (uint)Marshal.SizeOf<Native.MONITORINFO>() };
+        var info = new Native.MONITORINFOEX { cbSize = (uint)Marshal.SizeOf<Native.MONITORINFOEX>() };
         if (!Native.GetMonitorInfoW(mon, ref info)) return default;
         var r = info.rcWork;
         return new PixelRect(r.Left, r.Top, r.Width, r.Height);
