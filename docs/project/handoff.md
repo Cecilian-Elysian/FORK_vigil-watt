@@ -6,9 +6,9 @@
 
 ## 1. 当前状态
 
-当前源码版本 **1.2.3**（版本号继承上游 1.2.3，已合并上游 + 本 fork 的避让改动）。**已安装的仍是合并前的旧包**（Velopack 装在 `%LOCALAPPDATA%\VigilWattApp`，`1.2.2`+本 fork 提交），合并后的包还没打包安装。发新版时保留上一版 `*-full.nupkg` 作为 delta 基准；规则见 `dev/build.md` §8。
+当前源码版本 **1.2.4**（fork 版：合并上游 1.2.3 + 本 fork 的贴片避让）。**已安装**：`%LOCALAPPDATA%\VigilWattApp` 里的 1.2.4（Velopack 装，`dist/VigilWattApp-win-Setup.exe`），2026-10-22 装的。发新版时保留上一版 `*-full.nupkg` 作为 delta 基准；规则见 `dev/build.md` §8。
 
-⚠️ **应用内更新的坑**：应用内更新源指向上游，点了会装**上游的包、覆盖本 fork 的避让改动**（数据目录 `%LOCALAPPDATA%\VigilWatt` 不受影响）。想留在 fork 就别点更新提示，或把本 fork 版本号抬到上游之上（如 1.2.4）再重装。
+⚠️ **应用内更新的坑**：应用内更新源指向上游，版本号 ≤ 上游时会提示装**上游的包、覆盖本 fork 的避让改动**（数据目录 `%LOCALAPPDATA%\VigilWatt` 不受影响）。本 fork 抬到 1.2.4（> 上游 1.2.3）后，日志已是「Gitee 已是最新」——**别把版本号降回 1.2.3 及以下**。
 
 本仓库是 `evren-oct/vigil-watt` 的**个人 fork**（origin = `Cecilian-Elysian/FORK_vigil-watt`，SSH，2026-10-20 起推送）：改动只推 fork，不发 Release、不碰上游；上游 Releases 仍是稳定版来源。
 
